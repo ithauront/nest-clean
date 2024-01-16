@@ -140,3 +140,47 @@ para garantir que esteja funcionando e ele deve mostrar esse log;
 
 agora o nest ja vemcom um helloword então se a gente abrir um outro terminal e rodar uma chamada htttp para a portq que ele esta rodando que é por padréao a 3000 como a gente pode ver no main então se a gente abrir o navvegador e der um http://localhost:3000 ele vai mostrar hellowordl
 para evitar conflito de portas bvamos colocar para a porta 3333 
+# estrutura basica do nest
+o nest vem no src com tres arquivos alem do main: o service o module e o controler
+controller: é uma porta de entrada para nossa aplicação. geralmente uma porta de entrada via HTTP. entéao uando um cliente faz uma requisição http o primeiro arquivo que ouve essa requisição é um controller. todo controller no nest é identificado com um decoratror @controller()
+isso é uma caracteristica dierente do nest o uso de decorators. o nest faz muito uso de decorators
+os decorators são uma função que adiciona comportamento em algo pode ser uma classe um metodo, propriedade, qualquer coisa.
+uma representaão basica dele é ver ele como uma função que recebe algo como paramtro e devolve esse algo modificado
+então no caso do controler quando a gente clocar o @controller() e cima da classe que esta la a gente esta passando essa classe como parametro
+então usando o decorator controler a gente esta dizendo que a classde abaixo vai conter metodos que são rotas
+e as rotas são identificadas com outros decorators; no caso nos temos o @get()
+como a gente não passou nenhum parametro no get ele entende que é a rota root no nosso caso a que a gente definiu no main 3333
+tanto os metodos(decorator get) quando o decorator controller podem receber parametros. nos metodo a gente define a rota para aquele metodo por exemplo um /hello e no controller a gente define como parametro para todos os metodos que estão dentro dele como por exeplo ele vem no padrão / mas se a gente botar /api so chamar o 3333 néao funciona mais tem que chamar 3333/api e se quiser chamar o metodo que esta como hello la dentro vai ter que ser  3333/api/hello
+e nos temos todos os decoators para todos os metodos disponiveis no nest/comum é so importar.
+no caso o nosso controler ele ja esta sendo injetado com uma dependencia:
+ constructor(private readonly appService: AppService) {} 
+ o que mostra que no nest desde o inicio a gente ja esta usando o conceito de inversão de dependencia
+  ou seja o app controler não esta instanciando o appservice, el não faz new appService. ele esta recebendo o appservice como uma propriedade na verdade uma parametro no construtor que vira uma propriedade por causa do privetq que a gente coloca na frente ai depois a dente pode usar o app service nas funçéoes do controler.
+
+  app.module = a raiz do nosso projeto porque é ele que é usqdo no nest factory create. o modulo é um arquivo que junta tudo, todos os controlers, conexçoes com bando de dados e etc.
+  todo modulo é uma classe vazia (ele pode ter coisas dentro dele mas geralmente não vai ter)
+  o module é uma classe que tem o decorator module. e  ele recebe primariamente duas coisas o controlers e o providers (a gente pode tirar o import por enquanto) o controllers mostra quais controllers a gente recebe nesse modulo e como o controller esta recebendo uma dependencia a gente declara em providers todas as dependencias que o controllers possam receber
+  ai o nest vai perceber que o controller esta precisando de uma dependencia desse tipo e vai procurar dentro do modulo se tem alguma dependencia que bate com esse nome; ai ele olha no import, ve que tem e passa ela para la ele faz a injeção de dependencia totalmente automatizada. porem para a injeção acontecer o app.service precisa obrigatoriamente estar com o decorator injetable
+  ou seja a gente diz que o app service é injetavel que ele tem coisas que possam servir a outras classes e por isso podemos injetar ela.
+  no fim todo que não é controller provavelmente é um provider. por exemplo um repositorio do banco de dados, é um provider, caso de uso, etc. tudo que não recebe requisição http é provider, tudo que a gente vai precisar injetar em outras classes é provider.
+  a gente tem um outro conceito que é o import export mas vamos ir mas a fundo nele depois. mas ele basicamente serve para separar as coisas, se a gente ta com a aplicação muito grande e queremos separar por partes fazendo um efeito cascata a gente usa isso.
+  # eslint  prittier
+  camos configurar o eslint e o prettier no projeto
+  vamos instalar com a configuração da rocketseat
+  npm i eslint @rocketseat/eslint-config -D
+  e vamos na raiz do projeto criar um arquivo chamado .eslintrc.json e nele a gente coloca esse codigo:
+  {
+    "extends": "@rocketseat/eslint-config/node"
+}
+agora so de salvar essearquivo ele deve começar a apontar alguns erros
+a gente pode dar o npm run lint para dar fix em tudo.
+alem disso no controller fica um erro por causa do construtor vazio e em projetos typescript com injeção de dependencia pode acontecer frequante de ter construtor vazio então bamos voltar la no arquivo do extends do eslint e vamos subescrever essa regra fica assim:
+{
+    "extends": "@rocketseat/eslint-config/node",
+    "rules": {
+        "no-useless-constructor":"off"
+    }
+}
+vamos tambem criar um arquivo .eslintignore porque nas pastas dist e nodemodules tem varios codigos compilados que podem dar erro então para não ficar pesando isso a gente vai ignorar eles
+
+
