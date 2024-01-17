@@ -258,5 +258,168 @@ Lembre-se, a escolha entre usar volumes gerenciados pelo Docker e mapear diretó
 
  mas com isso nos temos nosso banco de dados confugurado.
  
+ # setup do prisma
+ vamos configurar e usar o prisma nesse projeto
+ vamos instalar ele como dependencia de desenvolvimento
+ npm i prisma -D 
+ isso instala a cli do prisma para rodar as migrations e tudo mais
+ e vamos instalar tambem o client do prisla
+ npm i @prisma/client
+ e essa como dependencia normal e não como dependencia de desenvolvimento.
+ com essas duas dependencias instaladas a gente pode rodar um npm ou npx ver qual funciona
+ npx prisma init
+ assim el vai criar a pasta prisma com o schema .prism dentro dele
+ para ver a sintaxe certinha temo que estar com a extenção do prisma instalada, se néao nao vai ter a sintax highlight
+ e ele vai criar tambem um arquivo .env
+ ai a gente vai logo la no gitignore e comoca o .env dentro dele
+ e vamos colocar tambem a pasta data do docker para ela não ser adicionada no github
+ 
+
+como não tem muito o que configurar vamos ja começar a criar o nosso primeiro schema.
+
+vamos la no prisma/shema.prisma
+e vamos adicionar o model User
+ele vai ter um id que vai ser a chave primaria e vai ser por default um uuid
+ele vai ter um nome
+um email que vai ser unico e vai ter uma senha
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id String @id @default(uuid())
+  name String
+  email String @unique
+  password String
+}
+
+porem a gente vai adicionar um map para essa tabela para renomear ela como user com letra minuscula assim a gente pode seguir o padrao de todas as tabelas começarem com letra minuscula e er um _ entre as palavras para isso a model user vai ficar assim ai ela via ficar no plural e com letra minuscula
+model User {
+  id String @id @default(uuid())
+  name String
+  email String @unique
+  password String
+
+  @@map("users")
+}
+
+agora que essa tabela esta feita nos vamos criar mais uma
+que é o model de question
+mais na frente a gente vai trazer as outras mas por enquanto vamos ter so o usuario e a pergunta
+
+ela vai ter tambem um id como a outra um title um slug que vai ser unico  um contente um created at que vai ser datetaime com o default para now e com um map para escrever ele em snakecase
+updatedAt com tambem um DateTime mas como opcional porque quando criar a pergunta ela não vai ter datade updatedAt e a gente coloca a flag do prisma  @updatedAt que vai atualizar automaticamente quando uma pergunta for atualizada ele vai atualizar automaticamente. colocamos o map tambem peo mesmo motivo para updated_at
+e fazemos o map da tabela para questions e vamos fazer um relacionamento author User e com a estenção do prisma se a gente salvar ele cria o relacionamento para a gente então fica assim antes de salvar
+
+model Question {
+  id String @id @default(uuid())
+  title String
+  slug String @unique
+  content String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  author User
+
+  @@map("questions")
+}
+
+apos salvar
+model Question {
+  id        String   @id @default(uuid())
+  title     String
+  slug      String   @unique
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  author User   @relation(fields: [userId], references: [id])
+  userId String
+
+  @@map("questions")
+}
+ele faz essa ateração automatica
+ele criou um campo UserId dentro dele que a gente vai renomear para authorId e trocamos tambem na relação o fields para authorId e fazemos o map dele tambem para ser snakecase
+
+model Question {
+  id        String   @id @default(uuid())
+  title     String
+  slug      String   @unique
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  authorId  String   @map("author_id")
+
+  author User @relation(fields: [authorId], references: [id])
+
+  @@map("questions")
+}
+
+e no user ele tambem criou o question
+model User {
+  id       String     @id @default(uuid())
+  name     String
+  email    String     @unique
+  password String
+  Question Question[]
+
+  @@map("users")
+}
+
+e  a gente vai mudar par questions no plural e com minusucula fica tudo assim
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String     @id @default(uuid())
+  name     String
+  email    String     @unique
+  password String
+  questions Question[]
+
+  @@map("users")
+}
+
+model Question {
+  id        String   @id @default(uuid())
+  title     String
+  slug      String   @unique
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  authorId  String   @map("author_id")
+
+  author User @relation(fields: [authorId], references: [id])
+
+  @@map("questions")
+}
+
+agora podemos rodar as migrations mas antes temos que rodar o nosso banco de dados então vamos no docker e inicialisamos ele
+depois de inicializar a gente vai no terminal e rodamos
+npx prisma migrate dev
+deu erro porque a gente não trocou as variaveis no .env vamos no arquivo .env e mudamos as coisas e e agente troca o johndoe pelo nome que a gente usou quando a gente fez o banco de dados e o ramdompassowrd pelo password que a gente a gente poderia tambem colocar o nome do banco nest-clean 
+ fez fica assim:
 
 
+DATABASE_URL="postgresql://postgres:docker@localhost:5432/nest-clean?schema=public"
+
+agora a gente roda de novo o npx prisma migrate dev vai pedir um nome para  a migration a gente diz createusersandquestions
+e agora com o npx prisma studio a gente ja pode ver nossa tabela.
+funcionou
