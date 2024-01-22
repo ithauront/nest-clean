@@ -423,3 +423,135 @@ DATABASE_URL="postgresql://postgres:docker@localhost:5432/nest-clean?schema=publ
 agora a gente roda de novo o npx prisma migrate dev vai pedir um nome para  a migration a gente diz createusersandquestions
 e agora com o npx prisma studio a gente ja pode ver nossa tabela.
 funcionou
+
+## criando serviço do prisma
+vamos configurar o service do prisma para que os controlers da aplicação possam acessar a conexão com o prisma em outros frameworks a gente criaria o arquivo prisma e criaria o prismaClient. mas dentro do nest como ele ja trabalha com a parte de inversção de dependencia vai ser um pouco diferente
+a gente vai criar no src uma pasta chamada prisma
+e dentro dela um arquivo chamado prisma.service.ts e como tudo que não é controller é um service a gete vai fazer uma classe para esse prisma service dentro desse aqruivo dessa forma:
+export class PrismaService {
+    
+}
+e todo servico que vai precisar ser inhetado em algum outro lugar da aplicação vai precisar ter o decorator injetable
+import { Injectable } from "@nestjs/common";
+
+@Injectable()
+export class PrismaService {
+    
+}
+assim a gente permite que ele seja usado em outras partes da aplicação.
+agora a gene vai la no nosso appmodules e eclara ele
+  providers: [AppService, PrismaService],
+
+  importando ele do lugar que a gente criou
+  agora todo o metodo que a gente colocar no nosso prismaService a gente pode pegar ela em outros controlers porque o nest vai injetar automaticamente
+  então agora dentro do prismaService a gente percisa fazer a conexão com o banco de dados e tem dois jeitos para isso.
+  a gente pode criar um construtor
+  passando para a classe um public client: PrismaClient e importando isso de @prisma/client
+  e ai no construtor a gente fae um this.client = new PrismaClient()
+
+  e agora a gente pode ir no controller e fazer um @post("/hello") {
+    store(): string
+    return this.prisma.client ( e qgora a gente ja vai ter acesso ao client aqui) e podenmos dar um .user.findMany()
+  }
+  
+  se a gente dar um post agora nessa rota vai retornar um array vazio porque não tem usuario no banco de dados mas se a gente criar um usuario com o prisma studio e dar o post nessa rota ele vai achar. então essa é uma forma de criar. MAS TEM UMA FORMA MAIS SIMPLES 
+  e assim que vamos fazer.
+  a gente vai na nossa classe prismaService e faz ela extender a prismaCleint
+  e agora não precisamos mais do public e podemos no constructor so chamar um super que ai ele vai chamar o constructor do prismaClient fica assim 
+  import { Injectable } from '@nestjs/common'
+import { PrismaClient } from '@prisma/client'
+
+@Injectable()
+export class PrismaService extends PrismaClient {
+  constructor() {
+    super()
+  }
+}
+
+e agora a gente não precisa mais usar o client la na nossa rota a gente pode usar direto this.prisma.user.findByMany() porque como ele ja esta estendendo o prismaClient ele ja é o client em si. o controller fica assim:
+import { Controller, Get, Post } from '@nestjs/common'
+import { AppService } from './app.service'
+import { PrismaService } from './prisma/prisma.service'
+
+@Controller()
+export class AppController {
+  constructor(
+    private readonly appService: AppService,
+    private prisma: PrismaService,
+  ) {}
+
+  @Get()
+  getHello(): string {
+    return this.appService.getHello()
+  }
+
+  @Post('/hello')
+  async store() {
+    return await this.prisma.user.findMany()
+  }
+}
+
+mas podemos melhorar isso. o super esta chamando o construtor do prismaClient então tudo que passamos para ele são os paramentros que podemos enviar direto para o prismaCleinte então podemos fazer um objeto e passar um log: ['query] 
+assim ele vai fazer um log nas query sql mas no nosso caso a gente so vai colocar o log em warn e em erro .
+import { Injectable } from '@nestjs/common'
+import { PrismaClient } from '@prisma/client'
+
+@Injectable()
+export class PrismaService extends PrismaClient {
+  constructor() {
+    super({
+      log: ['warn', 'error'],
+    })
+  }
+}
+
+com isso a nossa conexão esta finalizada. mas outra coisa que é legal de fazer é que dentro dos services do nest a gente pode implementar algimas interfaces  e tem uma que se chama onoduleInit e outra que se chama OnModuleDestroy e essas interfaces a gente pode pedir para o vscode implementar ai fica assim:
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
+import { PrismaClient } from '@prisma/client'
+
+@Injectable()
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
+  constructor() {
+    super({
+      log: ['warn', 'error'],
+    })
+  }
+
+  onModuleInit() {
+    throw new Error('Method not implemented.')
+  }
+
+  onModuleDestroy() {
+    throw new Error('Method not implemented.')
+  }
+}
+esses dois metodos são metodos que o nest chaa automaticamente quando o modulo que usa esse servico nesse caso o prisma service for ou instanciado no caso do init ou destruido no caso do destroy. isso acontece caso a nossa aplicação de um crash a gente quer que a conexão com o database feche então a gente vai configurar esses metodos
+vamos dar dentro desses metodos um return this.conect ou return this.disconect fica assim:
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
+import { PrismaClient } from '@prisma/client'
+
+@Injectable()
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
+  constructor() {
+    super({
+      log: ['warn', 'error'],
+    })
+  }
+
+  onModuleInit() {
+    return this.$connect()
+  }
+
+  onModuleDestroy() {
+    return this.$disconnect()
+  }
+}
+
+
+é importante implementar os dois porque pode dar um problema e a gente fazer o disconenct mas depois de concertar esse erro a aplicação vai subir de novo com o autorestart e ai ela vai ter que conectar
