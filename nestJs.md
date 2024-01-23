@@ -555,3 +555,122 @@ export class PrismaService
 
 
 é importante implementar os dois porque pode dar um problema e a gente fazer o disconenct mas depois de concertar esse erro a aplicação vai subir de novo com o autorestart e ai ela vai ter que conectar
+
+## controller de criação de conta
+agora nos podemos começar a construir nossa aplicação do zero. para iniciar essa fase vamos logo apagar o nosso app controller e o nosso app service que a gente não estara usando.
+e agora vamos começar a construir
+vamos criar uma pasta no src chamada controllers e uma pratica legal é que para cada rota a gente tenha um arquivo de controller diferente.
+teoricamente ul controller pode abrigar varias rotas, porem podem acontecer problemas de uma nova rota a gente não saber em qual controller usar, e pode se perder onde esta cada rota.
+então a gente vai criar uma rota para cada coisa. 
+vamos então criar uma rota para criação de conta
+create-account.controller.ts
+o .controller.ts é padr padrão do nest e agora ele funciona como uma extenção mas não precisa realmente usar o .controller a gente pode fazer so .ts
+dentro do arquivo a gente exporta a classe createaccount-controller
+ele vai usar o @controller
+e a gente pode botar logo o prefixo da rota accounts assim todas as rotas ai dentro vão usar esse prefixo
+ai dentro vai ter umunico metodo porque vamos ter um controlle por rota
+esse metodo vai ser o handle e ela vai receber o @Post e como a gente ja define o /acounts no controler a gente não precisa definir tambem no post mas sea gente quisesse a gente podia definir a rota no @Post e não no @Cotroller fica assim:
+import { Controller, Post } from '@nestjs/common'
+
+@Controller('/accounts')
+export class CreateAccountController {
+  @Post()
+  async handle() {}
+}
+
+agora vamos fazer o metodo handle. esse controller vai chamar o banco de dados então vamos dar um contructor antes do handle nesse constructor a gente mete um private Prisma : que vai ser do tipo PrismaService e a gente importa isso e na handle a gente faz uma cont name para ser jhon doe
+uma const para email e uma para password e vamos colocar123456
+agora para ciar o usuario a gente faz um await this.prisma.user.create({}) dentro do objeto a gente coloca data: {} e dentro do objeto de data a gente passa as informações
+fica assim:
+import { Controller, Post } from '@nestjs/common'
+import { PrismaService } from 'src/prisma/prisma.service'
+
+@Controller('/accounts')
+export class CreateAccountController {
+  constructor(private prisma: PrismaService) {}
+
+  @Post()
+  async handle() {
+    const name = 'Jhon Doe'
+    const email = 'jhon@doe.com'
+    const password = '123456'
+
+    await this.prisma.user.create({
+      data: {
+        name,
+        email,
+        password,
+      },
+    })
+  }
+}
+
+agora vamos para o app modules e retiramos os arquivos que deletamos e detro de controllers a gente passa o createAccountController
+sempre que a gente cria algo assim e com o app rodando o nosso log ai mostrar todas as rotas que estão e como elas funcionam e tudo mais. para evistar isso que no futuro vai ficar enrome a gente pode ir no arquivo main.ts
+e no nestFactoryCreate a gente passa logger colo false
+import { NestFactory } from '@nestjs/core'
+import { AppModule } from './app.module'
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, { logger: false })
+  await app.listen(3333)
+}
+bootstrap()
+
+mas isso pode ser mais pra frente, por enquanto não vamos botar.
+
+agora que a rota esta feita e o controller cadastrado se a gente rodar o banco de dados e chamar essa rota com o post ele vai criar e vai retornar 201 porque por ser rota post isso ja vem configurado. porem a gente pode mudar essa resposta de 201 usando outro decorator que é o httpCode(201) por exemplo que é o codigo que ja vem mas dessa forma a gente força que o codigo de sucesso dessa rota seja sempre o 201.
+assim:
+  @Post()
+  @HttpCode(201)
+  async handle() {
+    const name = 'Jhon Doe'
+    const email = 'jhon@doe.com'
+    const password = '123456'
+
+como a gente determinou que o email é unico se a gente chamar essa rota de novo vai dar erro nesse caso um 500 internal server error pq ele não consegue criar o usuario porque o email ja existe
+e como a gente não fez nenhuma tratativa de erro ainda ele vem assim no padrão.
+mas nossa criação esta em hardcode e a gente quer permitir que um usuario mande as coisas que ele quer para criar o usuario. como fazer isso. em um express por exemplo a gente pegaria o request e response das rotas e criaria isso. mas no nest não é assim. a gente vai usar decorator
+uma requisição pode ter parametros, headers, body etc. muita coisa vem em uma requisição e a gente não quer pegar tudo. nesse caso a gente quer apenas o body que é onde vai vir o name email e password
+então para isso dentro dos argumentos da handle a gente coloca @Body() body:any isso significa que a gente esta pegando o que vem no body da requisição e esta salvando em uma variavel chamada body que tem como tipo any
+sabendo que esse @Body é importado do nest commum
+se a gente der um conole.log nesse body e comentar o resto da função e rodar o post o body a gente vai ver no console.log que ele veio vazio porque a gente néao enviou nada. se a gente fizer um novo envio passando {name:iuri} no json a gente vai ver que dentro do body vai vir isso.
+então para capturar isso a gente pode fazer uma desestruturação e pegar de dentro do body o name, email e password dessa forma
+const {name, email, password} = body
+e descomentamos a parte do codigo de criação de usuario.
+import { Body, Controller, HttpCode, Post } from '@nestjs/common'
+import { PrismaService } from 'src/prisma/prisma.service'
+
+@Controller('/accounts')
+export class CreateAccountController {
+  constructor(private prisma: PrismaService) {}
+
+  @Post()
+  @HttpCode(201)
+  async handle(@Body() body: any) {
+    const { name, email, password } = body
+
+    await this.prisma.user.create({
+      data: {
+        name,
+        email,
+        password,
+      },
+    })
+  }
+}
+
+com isso a gente consegue ja criar o usuario usando a requisição
+
+agora que ja conseguimos criar o usuario a gente pode verificar antes de fazer a criçéao qe o email néao esta ducplicado para poder fazer uma tratatica de erro/ mas antes disso vamos corrigir um erro do nest que é no tsConfig.json o a gente tem que adicionar um campo para stric pq o padrão dele não vem como true a gente adiciona a linha do stric e modifica a do stricnullcheks para true fica assim:"strict": true,
+    "strictNullChecks": true,
+    logo depois do skipLibCheck
+    com isso a tipagem do nosso typescript vai verificar mais coisas. porque por exemplo ao fazermos um findunique a gente pode não encontrar um usuario. e nesse caso vai voltar nullo e ai o typescript antes não avisaria. e agora com essa nova regra ele avisa.
+
+    agora voltamos para o controller
+const userWithSameEmail = this.prisma.user.findUnique({ where: { email } })
+com essa linha a gente verifica se tem um email no banco de dados que é igual ao email que a gente recebeu.
+agora a gente faz o if para se ele econtrar
+pq se ele não encontrar ele vai direto para a criação de usuario
+no nosso if a gente coloca um throw new porem o nest tem varios tipos de exeption se a gente colocar expeption e dar un cntrl espaço a gente tem varias. a http expection que é para coisas http generica, mas tem outras, como forbiden, conflit, badrequest etc no nosso caso a gente vai usar a conflit que ja é o codigo 409 ( a gente pode ver deixando o mouse em cima dela.) e a gentepode passar uma msg passando uma string pra ela. o controller fica assim e agora podemos rodar o docker e ele com o nest:start e testar ele com o imsonmina
+testei e funconou.
