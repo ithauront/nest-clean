@@ -674,3 +674,53 @@ agora a gente faz o if para se ele econtrar
 pq se ele não encontrar ele vai direto para a criação de usuario
 no nosso if a gente coloca um throw new porem o nest tem varios tipos de exeption se a gente colocar expeption e dar un cntrl espaço a gente tem varias. a http expection que é para coisas http generica, mas tem outras, como forbiden, conflit, badrequest etc no nosso caso a gente vai usar a conflit que ja é o codigo 409 ( a gente pode ver deixando o mouse em cima dela.) e a gentepode passar uma msg passando uma string pra ela. o controller fica assim e agora podemos rodar o docker e ele com o nest:start e testar ele com o imsonmina
 testei e funconou.
+# hash de senha
+vamos agora fazer o hash da senha para isso
+vamos instalar o bcryptJs
+npm i bcryptjs
+e como ele não é desenvolvido com o typescript a gente precisa tambem intstalat o types dele npm i @types/bcrptjs -D
+com isso instalado a gente vai para a pagina do controller de create acount e importamos o hash de dentro do bcryptjs
+e depois do condicional do user com mesmo email a gente faz uma const para hashedPassowrdf para a agente fazer o hash do password
+e ai como a hash é uma função assincrona a gente tem que fazer o await, e passamos para o hash o password e a gente pode passar um salt(que éuma string que é usada para gerar o hash) u a gente pode gerar o numero de rounds da senha, isso de rounds é mais comum. quanto mais alto mais forte a senha, porem mais lento 8 é um bom numero e padrão.
+então nos vamos fazer assim, passando so o round de 8 fica assim:
+const hashedPassword = await hash(password, 8)
+e agora para o password na criação do usuario a gente passa o hashedpassword
+e agora a senha ja esta sendo salva como hash. fica assim:
+import {
+  ConflictException,
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+} from '@nestjs/common'
+import { hash } from 'bcryptjs'
+import { PrismaService } from 'src/prisma/prisma.service'
+
+@Controller('/accounts')
+export class CreateAccountController {
+  constructor(private prisma: PrismaService) {}
+
+  @Post()
+  @HttpCode(201)
+  async handle(@Body() body: any) {
+    const { name, email, password } = body
+
+    const userWithSameEmail = await this.prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (userWithSameEmail) {
+      throw new ConflictException('e-mail already exists.')
+    }
+
+    const hashedPassword = await hash(password, 8)
+
+    await this.prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+      },
+    })
+  }
+}
