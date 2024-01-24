@@ -724,3 +724,144 @@ export class CreateAccountController {
     })
   }
 }
+
+## pipe de validaçéao de dados
+vamos instalar o zod que é a biblioteca que vamos usar para validação de dados.
+npm i zod
+agora la no arquivo de create account a gente vai importar o z de dentro do zod e vamos criar um schemma
+entéao antes de explortar a classe a gente faz o const createAccountBodySchemma = e ela via ser um z.oject e a gente fala o que ela recebe entéao ela vai receber um nome um email e uma password todos vão ser string e o email a gente adiciona que vai ser email
+
+const createAccountBodySchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string(),
+})
+
+e agora o legal com o zod é que a gentez pode inferir uma tipagem então abaixo disso a gente pode criar o type CreateAccountBodySchema = z.infer<typeof createAccountBodySchema >
+ou seja a gente faz a const e a gente passa essa const como a tipagem. agora no lugar do any que era o tipo do body a gente pode usar essa tipagem
+esse trecho fica assim:
+import { z } from 'zod'
+
+const createAccountBodySchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type CreateAccountBodySchema = z.infer<typeof createAccountBodySchema>
+
+@Controller('/accounts')
+export class CreateAccountController {
+  constructor(private prisma: PrismaService) {}
+
+  @Post()
+  @HttpCode(201)
+  async handle(@Body() body: CreateAccountBodySchema) {
+
+    porem porenquanto a gente so ta tipando e não esta validando. 
+    para validar o que a gente pode fazer é que para pegar o name email e password do body a gente pode colocar esse body dentro de um parse do nosso esquema
+        const { name, email, password } = createAccountBodySchema.parse(body)
+        com isso ja valida porem a gente não trata os possiveis erros, por exemplo se a gente colocar algo que não é email no lugar de email. ele vai dar um internal server error
+  
+  tem varias formas de lidar com essa tratativa de erro. a gente poderia fazer um safeparse e um if para o caso de não ser sucesso, poderia fazer um try catch, etc. mas como vamos precisar usar isso em todas as rotas a gente pode fazer uma tratativa mais global que vai poder ser reaproveitada depos.
+  então na documentação do nest a gente pode achar algo para a construção de pipes. que são interceptadores, como middleware, uma tubulação que vai reenaminhar o fluxo caso aconteça algo, um erro. eles tem uma sintaxe um pouco diferente de um midleware mas servem o mesmo proposito.
+  vamos fazer pipe para validation
+  a gente vai no src criar uma pasta chamada pipes e dentro dela um arquivo chamado zod-validation-pipe.ts
+a base do arquivo é essa
+import {
+  ArgumentMetadata,
+  BadRequestException,
+  PipeTransform,
+} from '@nestjs/common'
+import { ZodObject } from 'zod'
+
+export class ZodValidationPipe implements PipeTransform {
+  constructor(private schema: ZodObject<any>) {}
+
+  transform(value: any, metadata: ArgumentMetadata) {
+    try {
+      this.schema.parse(value)
+    } catch (error) {
+      throw new BadRequestException('Validation failed.')
+    }
+    return value
+  }
+}
+
+a gente troca o zobObject por zodSchema para não precisar passar o <any> essa classe que a gente tem vai ter um construtor então a gente precisa passar para ela um schema
+a gente pode tirar o metadata tambem
+e ai eme tem o metodo transforme que a gente usa por causa do pipe transtofme que é o unico tipo de coisa que o pipe vai fazer que é receber o valor pelo pipe e transformar isso em outra coisa no caso vai ser um parse que caso falhe ele vai mandar uma bad request exception
+e no value a gente coloca unknonw fica assim mas logo a gente vai melhorar um pouco isso:
+import { BadRequestException, PipeTransform } from '@nestjs/common'
+import { ZodSchema } from 'zod'
+
+export class ZodValidationPipe implements PipeTransform {
+  constructor(private schema: ZodSchema) {}
+
+  transform(value: unknown) {
+    try {
+      this.schema.parse(value)
+    } catch (error) {
+      throw new BadRequestException('Validation failed.')
+    }
+    return value
+  }
+}
+
+agora a gente vai no nosso controller e logo depois do @Post a gente vai fazer @usePipes e passar para ele o nez zodValidation piope que fizemos e passamos para ele o schema que criamos e poremos tirar o parse do body que a gente fazia antes porque quem vai faer o parse é  body:
+ @Post()
+  @UsePipes(new ZodValidationPipe(createAccountBodySchema))
+  @HttpCode(201)
+  async handle(@Body() body: CreateAccountBodySchema) {
+    const { name, email, password } = body
+
+    dessa forma se a gente mandar algo que néao valide ele ja retorna cpma  messagem
+    de validation error que a gente fez
+    agora amos voltar para o nosso pipe para melhorar ele. na parte do erro a gente vai fazer um if error for instanci de zod error a gente vai dar throw new BadRequest expection mas a gente pode mandar para ele um objeto entéao dentro vaos tar um error.format() assim ele vai formatar o erro de uma maneira mais facil de ler, e tambem vamos mandar message 'validationErroré e o status code 400
+     transform(value: unknown) {
+    try {
+      this.schema.parse(value)
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({
+          message: 'Validation failed.',
+          statusCode: 400,
+          errors: error.format(),
+        })
+      }
+      throw new BadRequestException('Validation failed.')
+    }
+
+    assim no error format a gente recebe o tipo de erro que é invalid email e a gente pode sar isso. se passar por não ser um instance of zod Error ele vai vair no validation failed normal.
+    a gente pode instalar uma biblioteca para ajudar azod-validation-error
+    vamos instalar npm i zod-validation-error
+    e ela deixa nossos error ainda mais legiveis
+    então a gente vai chamar o fromZodError dessa biblioteca e comocar no errors e o erro dentro do fromZodError assim
+    errors: fromZodError(error),
+    com isso a gente vai ter no log dentro de error o details que vai nos dar o codigo que vai ser invalid string a mensgame que é a invalid email  o path que é email e o validation que é o email ou seja em qual validação falhou. clarro que isso para o caso de a gente ter feito um teste que tenha falhado porque a gente não colocou um email possivel.
+    agora o nosso pipe esta feito e sempre que a gente precisar de uma validação a gente vai usao @UsePipies
+    a o nosso pipe fica assim:
+    import { BadRequestException, PipeTransform } from '@nestjs/common'
+import { ZodError, ZodSchema } from 'zod'
+import { fromZodError } from 'zod-validation-error'
+
+export class ZodValidationPipe implements PipeTransform {
+  constructor(private schema: ZodSchema) {}
+
+  transform(value: unknown) {
+    try {
+      this.schema.parse(value)
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({
+          message: 'Validation failed.',
+          statusCode: 400,
+          errors: fromZodError(error),
+        })
+      }
+      throw new BadRequestException('Validation failed.')
+    }
+    return value
+  }
+}
+s
