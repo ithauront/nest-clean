@@ -864,4 +864,75 @@ export class ZodValidationPipe implements PipeTransform {
     return value
   }
 }
-s
+
+# est client extention
+a gente vai instalar a extenção rest client essa extenção fica armazenada no projeto enão se oitra pessoa pegar ele tambem vai ter acesso
+a gente vai no vscode e instala essa extenção
+para colocar ela no projeto a gente cria um arquivo na raiz do projeto que a gente pode dar o nome que quiser nesse caso vai ser client.http
+e nesse arquivo vamos escrever as nossas requisições
+vamos no caso colocar a nossa unica que temos porenauqnto que é a de criação de usuario
+a gente coloca o tipo de requisição POST  e o endereço
+embaixo a gente coloca o tipo do conteudo application/json 
+e abaixo disso a gente manda um objeto com o body da requisiàao
+POST http://localhost:3333/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@reis.com",
+    "password": "123456"
+}
+
+agora aparece la um send request e se a gente tiver com a aplicação rodando a gente pode mandar esse sendrequest
+porem da para melhorar isso porque usando o rest client a gente pode fazer algumas variaveis como o @baseUrl e a gente define ela como o localhost aue estamos usando
+e agoraem cada requisição ao inves de chamar o nome inteiro a gente vai chamar so o baserl e se a gente tivr elas com ### tres hashtags
+gente tem que separar elas com ### tres hashtags
+
+e a gente tambem pode colocar nome nas requisições usando # @name fica assim:
+@baseUrl = http://localhost:3333
+
+# @name create_account
+POST {{baseUrl}}/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@reis.com",
+    "password": "123456"
+}
+
+###
+
+# @name autenticate
+POST {{baseUrl}}/sessions
+Content-Type: application/json
+
+{
+    "email": "iuri@reis.com",
+    "password": "123456"
+}
+
+
+com isso a gente fez o esqueletp de nossas requisições. a sessions ainda não existe. e tambem se a gente ficar mandado a create vai dar erro porque o email ja existe. mas pelo menos o rest client jporem estava tendo um erro que eu vi que algumas pessoas na internet tambem estavam tendo se a gente deixar como localhost. por qlgum motivo temos que trocar o localhost por [::1] e dessa forma ele funciona então fica assim:
+@baseUrl = http://[::1]:3333
+
+# @name create_account
+POST {{baseUrl}}/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@rei7.com",
+    "password": "123456"
+}
+
+###
+
+# @name autenticate
+POST {{baseUrl}}/sessions
+Content-Type: application/json
+
+{
+    "email": "iuri@reis.com",
+    "password": "123456"
+}
