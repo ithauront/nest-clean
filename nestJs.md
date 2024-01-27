@@ -936,3 +936,94 @@ Content-Type: application/json
     "email": "iuri@reis.com",
     "password": "123456"
 }
+
+## cofigurar env
+geralmente a gente pega as env usano o process.env mas isso não permite toda e qualquer manipulação no nest a gente vai usar o zod junto com o process env para poder validar e transformar as variaveis ambientes
+vamos usar um modulo do nest para poder fazer isso que é o nest config isso é a recomendação do proprio nest ent éaio valois instalar isso
+npm i @nestjs/config
+dentro de src a gente cria um arquivo chamado env.ts
+neal vamos exportar uma const chamada envScmeha sendo um z.object e vamos declarar todas nossas variaveis ambiente nessa classe a gente começa tendo so a databaseURL
+import { z } from 'zod'
+
+export const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+})
+vamos colocar tamber uma para port e ai qa gente tem que usar o vcoerce para ela transormal em numero. ela vai ser tambem opcional e ter default de 3333
+agora vamos exoportar o type env que  = z.infer<envSchema>
+assim ele vai pegar o type das variaveis q a gente informar
+import { z } from 'zod'
+
+export const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().optional().default(3333),
+})
+
+export type Env = z.infer<typeof envSchema>
+
+
+agora a gente tem que ir no appmodule e importar o ConfigModule de nest:config
+import { ConfigModule } from '@nestjs/config'
+agora no module a gente da um imports e nele um array no qual a gente passa o configmodule
+teemos tambem que passar forroot()
+o forroot significa que nesse modulo a gente pode passar configuração
+e ai dentro do forroot a gente vai passar o esquema de validação não vamos passar o validaionschemma porque para o nest ele néao esta usando o zod e sim o joi então para ontornar isso a gente vai usaro o validate
+para o validate a gente passa o env e usamos uma função para ele validar se é true ou false então passamos uma arrow e o envSchema.parse(env) 
+e depois passamos uma outra opção que é isglobal como true
+assim a gente pode separar a nossa aplicação em varios modulos menores e kuntar eles todos sem problemas e sem configurar as variaveis em todos eles. com o true ele pode ser acessado em todos modulos da aplicação. fica assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma/prisma.service'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+  ],
+  controllers: [CreateAccountController],
+  providers: [PrismaService],
+})
+export class AppModule {}
+
+
+agora para usar a gente vai usar o configService que vai serusado como o prismaService com inversão de dependencia e elas sendo injetadas automaticamente.
+ou seja a gente joga ele nos construcotrs das classes
+no prisma não precisamos pq ele pega automaticamente mas va:os usar no main,
+so que para o main é um pouco diferente
+a gente tem logo depois de definir o app colocamos uma linhq aue a gente copia da propria documentação do nest que é assim
+const configService = app.get(ConfigService)
+importamos o configService
+o app.get pega uma dependencia da nossa aplicação
+a gente poderia por exemplo passar o prismaService e teriamos acesso ao prismaService nele
+agora com o configService a gete pode pegar a portq qeu é fazerndo uma const para port sendo igual a configService.get('e o nome da variavel ambiente aqui no caso PORT')
+ const port = configService.get('PORT')
+ e agora no listen a gente passa a port
+ porem se a gente passar o mouse em port a gente ve que a tipagem esta como any.
+ ele não ta conseguindo fazer a inferencia porque o configService esta com um tipo unknown e boolean o unknown é o tipo das variaveis ambeientes e a gente precisa passar isso para ele a gente pode fazer de varias formas uma é dar :ConfigService<env> e importar isso e ai ja funcionaria
+ a gente pode tambem no fim da linha do configserv passar um as ConfigService<env> mas nesse caso a gente esta forçando a tipagem dele o que nãoé tão bom e a outra forma seria passar no get um < e aqui a gente passa a tipagem>
+ vamos usar essa mas ela funciona da mesma forma que a primeira
+   const configService = app.get<ConfigService<Env>>(ConfigService)
+
+   porem apesar de ele fazer a inferencia no get e ele ja sugerir o port e as variaveis que a gente tem la, se a gente passar o mouse no port continua como any. para fazer a inferencia la tambem a gente tem que passar o infer:true dentro de um objeto como segundo argumnto do get
+   assim:
+     const port = configService.get('PORT', { infer: true })
+     porem ai no listen vai dar erro porque le diz que pode ser undefined. e é porque a gente diz que ele pode ser opcional no env. porem caso ele seja opcional a gente da um default então ele nunca vai ser undefined. aparece o undefind entéao porque por padrão para o nest todas as variaveis ambiente podem ser undefined
+     porque alguem pode copiar isso e não passar as variaveis ambientes e tudo. entéao a gente precisa avisar para o nest que a gente fez a validação das variaveis ambientes. para isso tem no ConfigService um segundo paramentro chamado wasValidated que como padrão é falso. e se a gente passar isso para true o erro para. então tudo fica assim e não tem erro:
+     import { NestFactory } from '@nestjs/core'
+import { AppModule } from './app.module'
+import { ConfigService } from '@nestjs/config'
+import { Env } from './env'
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule)
+
+  const configService = app.get<ConfigService<Env, true>>(ConfigService)
+  const port = configService.get('PORT', { infer: true })
+
+  await app.listen(port)
+}
+bootstrap()
+
