@@ -1145,4 +1145,147 @@ import { authModule } from './auth/auth.module'
 })
 export class AppModule {}
 
+vamos agora então criar a chae publica e a chave privada do noso app. porem elas precisam seguir umcerto padrão e se a gente for la no site do jwt e olhar o  rs256 vai ter algumas possibilidades então a gente precisa gerar essas chaves então a gente pode pedir no google ou no chatgpt um generate private e public key on rsa256 for windows
+ai o chat vai ensinar a fazer usando o openssl
+ele da um comando para usarmos no terminal e geramos isso na raiz do nosso projeto
+openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048
 
+colei isso e ele rodou 
+vai aparecer um novo arquivo no nossa raiz chalado private_key.pey e vai ter um formato que começa com begin private key e termina com end private key
+gora apartir da chave privada a gente vai gerar uma chave publica. a gente pode gerar varias chaves publicas para gerar a chave publica a gente usa o segundo comando que a 
+openssl rsa -pubout -in private_key.pem -out public_key.pem
+
+ai ele gera um arquivo public_key.pem é uma chave bem menor
+e agora o que a gente vai fazeré converter o conteudo desse arquivo para base64 porque se não fica uma chave enorme com varias quebras de linha
+vamos pedir pro gpt convert file content to base64
+o chat ensina a fazer de varias formas uma delas usando o proprio o proprio base64 para não ter a quebra de linhas vamos colocaro -w 0 no inicio
+no caso a gente colocar o camoninho do file
+fica
+base64 -w 0 private_key.pem > private_key_base64.txt
+
+vamos fazer igual com a publickey
+base64 -w 0 public_key.pem > public_key_base64.txt
+
+agora vamos copiar essas chaves geradas e vamos colar no nosso env.
+sob o nome correto de public e private key
+JWT_PRIVATE_KEY
+JWT_PUBLIC_KEY
+
+com isso feito ja podemos deletar os arquivos do base64. e mais tarde vamos tambem deletar os .pem
+é muito importante deletar os base64 porque ele não é um processo de hashing então a partir dele da pra pegar de volta a chave.
+mas agora vamos la no nosso env.ts e vamos validar as keys
+import { z } from 'zod'
+
+export const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().optional().default(3333),
+  JWT_PRIVATE_KEY: z.string(),
+  JWT_PUBLIC_KEY: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+
+agora a gente pode ir no nosso authModule e ter pegar a public e private
+porem no nosso return como ela esta em base64 a gente não pode simplismente passar essa string a gente tem que fazer um processo de decode então vamos dar um buffer from e passar a key e depois o tipo de encode que é o base64 o buffer é uma forma do node de ir lendo arquivo. a gente podia dar uma representação em texto se a gente colocasse um .toString no fim mas como as keys aceitam buffer não vamos precisar disso 
+ publicKey: Buffer.from(publicKey, 'base64'),
+ e precidamos tambem passar o singoptions com o algoritmo rs256 para ele saber em qual tiopo estamos escrevendo essas keys   return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+    
+      com isso a gente ja esta pronto para fazer a nossa autentificação.
+      para isso então ainda nesse mesmo arquivo
+nos vamos para logo abaixo do inject
+e vamos passar a opção global como true
+isso é para quea gente que esta usado a jwtmodule dentro do authmodule mas a gente quer usar a geração de token por dentro de um controller a gente precisa que seja global. então vamos colocar esse true e o authmodule fica assim:
+import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { Env } from 'src/env'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      global: true,
+      async useFactory(config: ConfigService<Env, true>) {
+        const privateKey = config.get('JWT_PRIVATE_KEY', { infer: true })
+        const publicKey = config.get('JWT_PUBLIC_KEY', { infer: true })
+
+        return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+        }
+      },
+    }),
+  ],
+})
+export class authModule {}
+
+agora vamos criar um arquiv de autentication-controller.ts
+dentro da pasta de controlers
+vamos copiar o createaccountcontroler e colar nesse novo autanticatin-conttoller
+e apagamos varias coisas e comentamos outras, apenas para a gente testar se estamos conseguindo gerar um token
+fica assim:
+import { Controller, Post } from '@nestjs/common'
+
+import { PrismaService } from 'src/prisma/prisma.service'
+
+// const createAccountBodySchema = z.object({
+//  name: z.string(),
+//   email: z.string().email(),
+//   password: z.string(),
+// })
+
+//  type CreateAccountBodySchema = z.infer<typeof createAccountBodySchema>
+
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(private prisma: PrismaService) {}
+
+  @Post()
+  //  @UsePipes(new ZodValidationPipe(createAccountBodySchema))
+  // @HttpCode(201)
+  async handle() {}
+}
+
+e agora vamos alterar um pouco isso. no constructor ao invez do prisma vamos pegar o jwt: JWTService que vem do nestJWT
+agora dentro do handle a gente faz o const token = this.jwt.sign({e qaui a gente passa um payload como um sub:user-id}) esse userId por enauqntro é ficticio.
+e repois a gente da um return token
+import { Controller, Post } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+
+import { PrismaService } from 'src/prisma/prisma.service'
+
+// const createAccountBodySchema = z.object({
+//  name: z.string(),
+//   email: z.string().email(),
+//   password: z.string(),
+// })
+
+//  type CreateAccountBodySchema = z.infer<typeof createAccountBodySchema>
+
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  //  @UsePipes(new ZodValidationPipe(createAccountBodySchema))
+  // @HttpCode(201)
+  async handle() {
+    const token = this.jwt.sign({
+      sub: 'user-id',
+    })
+    return token
+  }
+}
+
+vamos agora no appmodule e passar o nosso controler
+ controllers: [CreateAccountController, AutenticateController],
+ e não podemos esquecer de importar ele.
+ agora com isso feito a gene pode rodar o database e o app e a gente vai no client.http e manda a requisição para o sessions e ele devolve para a gente um token. ou seja o token esta sendo gerado.
+ a gente pode pegar esse token e jogar la no site do jwt para descriptar ele e ver se bate a nossa sub.
+ 
