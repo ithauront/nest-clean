@@ -1027,3 +1027,122 @@ async function bootstrap() {
 }
 bootstrap()
 
+## configurar jwt e autentication
+vamos criar uma pasta chamada auth para colocar tudo que é de autenticação dentro dela. e ai dentro dessa pasta a gente pode fazer varios arquivos como um auth.module.ts
+a gente faz nela uma classe para authmodule e usa o decorator module nela
+import { Module } from '@nestjs/common'
+
+@Module({})
+export class authModule {}
+
+passando para ele um objeto vazio por enquanto
+e agora dentro do app.module.ts a gente pode iportar o authmodule assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma/prisma.service'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env'
+import { authModule } from './auth/auth.module'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    authModule,
+  ],
+  controllers: [CreateAccountController],
+  providers: [PrismaService],
+})
+export class AppModule {}
+
+
+o legal disso é que agora tudo que a gente definir na classe authModule vai funcionar em todo o app porqiue ele esta dentro dos imports
+e o nest automaticamente coloca ele para funcionar na aplicação inteira.
+agora a gente para comecar a construir o nosso auth.module vamos ter que instalar antes o nestjs passport e o nestjs jwt. para isso a gente vai dar o comando no terminal
+npm i @nestjs/passport @nestjs/jwt
+
+o passport é uma biblioteca bem famosa para autentificação ele automatica fluxos de autenteificação que são comuns em aplicação web como o jwt tradicional e tal. como tokens que exipram tokens que néao expiram e etc
+com isso instalado a gente vai no decorator do module do authmodule e importamos o passport e o jwt porem o jwt a gente precisa configurar então damos um ponto nele e ja tem o register e passamos esse metodo e ai a gente pode passar varias coisas como secret algoritmo e etc; a gente quer usar as nossas env aqui porque a gente quer que a nossas chaves sejam armazenadas nas nossas envs
+
+para isso a gente vai na nosso arquivo env e colocar um JWT_SECRET = 'define qlguma chave aqui'
+e no nosso env.ts a gente vai definir ela para validaàéao por enquanto como uma string
+import { z } from 'zod'
+
+export const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().optional().default(3333),
+  JWT_SECRET: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+
+
+porem agora voltando no nosso auth.module se a gente colocar o secret nas configs do jwt a gente ainda não consegue acessar o configservice para pegar as variaveis ambiente
+porque o config service é uma classe
+então no nest para resolver isso a gente e usar nas configuraçéoes de um modulo dados de algum serviço. para isso a gente tem a registerAsync no lugar da register
+JwtModule.registerAsync({
+
+  })],
+  com o registerAsync a gente tem dentro do objeto outras opções temos o inject que é para a gente passar uma lista de serviços que a gente quer que sejam injetados enquanto estéaos registrando esse modulo então a gente passa o inject: [configService]
+  ai a gente pode criar uma função usando o useFactory que ja vem automatico a gente define ela como async e dentro do useFactory a gente diz que recebe config; configservice e passamos o generic detipo env e , true
+  e ai de dentro dessa função a gente vai retornar as nossas configurações
+  mas agora dentro dessa funçõa a gente ja tem acesso as env
+  para pegar ele a gente colocar uma const secret e passa para ela 
+   const secret = config.get('JWT_SECRET', { infer: true })
+   a gente pega ela pelo config.get e a gente precisa passar o infer true
+   ai no return da função a gente retorna o secret, mas nos podemos retornar varias outras configurações tambem se a gente quiser
+   é legar entender que no jwt existem varios algoritmos como esse qu a partir de um secret faz o nosso jwt
+   porem esse não é o modelo mais seguro. porque imagina que a gente criou um backend principal da aplicaçõa que é onde o usuario faz autentificação. nesse momento ele gera um jwt. imagina que em algum momento a gente tenha um segundo backend na aplicaçõa. e algumas rotas desse segundo backend a gente precise garantir que o ususario esteja logado para ter acesso a essas rotas
+   para garantir esse login a gente vai precisar validar o token que foi regado no primeiro servico do primeiro backend e ai o secret para gerar esse jwt esta dentro desse primeiro serviço. para a gente validar no segundo backend a gente teria talvez ue replicar o secret em dois backends é um pouco inseguro porque o segundo serviço não quer gerar novos tokens, ele so quer validar. e ainda assim ele teria o secret nele.
+   para contornar isso a gente usa o algoritmo rs256
+   nesse caso ele é melhor porque nosso secret não vai ser so uma chave secret. ele vai ser uma chave privada e uma chave publica.
+   a chave privada pode ser usada para criação de novos tokens. e o public apenas para validação sem permitir criar nosvos
+   assim a chave publica vai poder estar presente em todos os servicços que possam validar o usuario.
+   a chave publica não tem problema de vazar porque com ela não da para criar novos tokens.
+   vamos fazer esse fluxo de autentificação na nossa aplicação. mas antes disso vou colocar como os arquivos estão agora.
+   import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { Env } from 'src/env'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      async useFactory(config: ConfigService<Env, true>) {
+        const secret = config.get('JWT_SECRET', { infer: true })
+
+        return {
+          secret,
+        }
+      },
+    }),
+  ],
+})
+export class authModule {}
+
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma/prisma.service'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env'
+import { authModule } from './auth/auth.module'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    authModule,
+  ],
+  controllers: [CreateAccountController],
+  providers: [PrismaService],
+})
+export class AppModule {}
+
+
