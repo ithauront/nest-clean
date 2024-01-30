@@ -1288,4 +1288,109 @@ vamos agora no appmodule e passar o nosso controler
  e não podemos esquecer de importar ele.
  agora com isso feito a gene pode rodar o database e o app e a gente vai no client.http e manda a requisição para o sessions e ele devolve para a gente um token. ou seja o token esta sendo gerado.
  a gente pode pegar esse token e jogar la no site do jwt para descriptar ele e ver se bate a nossa sub.
- 
+
+ # controller de autenticação
+vamos tirar as partes comentadas no nosso conreller de autentication e importar o zod
+ e a gente muda o nome para autenticatebodyschema 
+ a gente importa o zod validation pipe e tudo mais o httpcode a gente pode tirar porque ele ja vai lançar o basico que é o 201.
+ agora a função handle vai receber o @body que é do tipo AutenticateBodySchema
+   async handle(@Body() body: AutenticateBodySchema) {
+    agora dentro do handle a gente pega de dentro do body o email e a senha e fazemos o processo de validação
+mas precisamos do prisma então no constructor em qualquer ordem a gente tem que jogar ele com um private prisma : PrismaService
+constructor(
+    private jwt: JwtService,
+    private prisma: PrismaService,
+  ) {}
+
+  agora a gente faz a const user ser igual a await this.prisma.user.findUnique e ai a gente procura onde o email é igual o email para saber se o usuario existe
+   const user = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+    })
+
+agore ra a gente faz a condicional para caso a gente não ache a gente restornar o erro de usuario não encontrado com uma mensagem essa exception ja vai com o codigo 401 automatico.
+  if (!user) {
+      throw new UnauthorizedException('user credentials do not match')
+    }
+
+agora se o usuario existir a gente tem que verificar se a senha dele bate então vamos fazer a const isPasswordValid para isso a gente usa o await com o metodo compare que vem de dentro do bctypt e a gente passa a senha do usuario e em segundo argumento a senha que esta salva no banco de dados
+const isPasswordValid = await compare(password, user.password)
+podemos fazer um novo erro para se a senha não for valida usando o mesmo unautorized epection
+  if (!isPasswordValid) {
+      throw new UnauthorizedException('User credentials do not match')
+    }
+
+e ai depois disso tudo a gente faz o token que ja estava sendo feito, vamos so renomare ele para acess token e no sub a gente coloca o id do usuario e no return a gente devolve dentro de um objeto e apenas para ficar padr éao para o fronend a gente retorna ele com underline 
+  const acessToken = this.jwt.sign({
+      sub: user.id,
+    })
+    return {
+      acess_token: acessToken,
+    }
+
+    agora se a gente testar isso com um usuario que tenha  senha em hash ele ja consegue validar
+    a pagina fica assim:
+    import {
+  Body,
+  Controller,
+  Post,
+  UnauthorizedException,
+  UsePipes,
+} from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { z } from 'zod'
+import { ZodValidationPipe } from 'src/pipes/zod-validation-pipe'
+import { PrismaService } from 'src/prisma/prisma.service'
+import { throttle } from 'rxjs'
+import { compare } from 'bcryptjs'
+
+const autenticateBodySchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type AutenticateBodySchema = z.infer<typeof autenticateBodySchema>
+
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(
+    private jwt: JwtService,
+    private prisma: PrismaService,
+  ) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(autenticateBodySchema))
+  async handle(@Body() body: AutenticateBodySchema) {
+    const { email, password } = body
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+    })
+
+    if (!user) {
+      throw new UnauthorizedException('User credentials do not match')
+    }
+
+    const isPasswordValid = await compare(password, user.password)
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('User credentials do not match')
+    }
+
+    const acessToken = this.jwt.sign({
+      sub: user.id,
+    })
+    return {
+      acess_token: acessToken,
+    }
+  }
+}
+
+
+ # protegendo rotas com guard
+ vamos criar rotas que so vao poder ser acessadas se o usuario estiver autenticado
+
