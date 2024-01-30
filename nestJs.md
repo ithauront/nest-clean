@@ -1329,7 +1329,7 @@ e ai depois disso tudo a gente faz o token que ja estava sendo feito, vamos so r
       acess_token: acessToken,
     }
 
-    agora se a gente testar isso com um usuario que tenha  senha em hash ele ja consegue validar
+    agora se a gente testar isso com um usuario que tenha  senha em hash ele ja consegue validar temos tambem que tirar o name do validationSchema
     a pagina fica assim:
     import {
   Body,
@@ -1342,11 +1342,9 @@ import { JwtService } from '@nestjs/jwt'
 import { z } from 'zod'
 import { ZodValidationPipe } from 'src/pipes/zod-validation-pipe'
 import { PrismaService } from 'src/prisma/prisma.service'
-import { throttle } from 'rxjs'
 import { compare } from 'bcryptjs'
 
 const autenticateBodySchema = z.object({
-  name: z.string(),
   email: z.string().email(),
   password: z.string(),
 })
@@ -1393,4 +1391,288 @@ export class AutenticateController {
 
  # protegendo rotas com guard
  vamos criar rotas que so vao poder ser acessadas se o usuario estiver autenticado
+vamos criar um novo controller create-question-controller.ts
+a gente copia o autenticate e joga no create question
+e a gente tira tudo que tem nela para ela ficar o mais vazio possivel. fica assim:
+import { Controller, Post } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+
+@Controller('/questions')
+export class CreateQuestionController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  async handle() {}
+}
+
+ja mudando o endereço para questions e o nome da clsse
+
+agora vamos la no nosso clien.http e fazemos uma solicitação para isso por enquanto sem o usuario assim:
+# @name create-question
+POST {{baseUrl}}/questions
+Content-Type: application/json
+
+vamos no app module e cadastramos o controller
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    authModule,
+  ],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+  ],
+  providers: [PrismaService],
+})
+export class AppModule {}
+
+porem a gente quer que essa rota so seja acessivel se o user estiver autenticado ou seja se ele enviar um token.
+então a gente precisa em primeiro lugar configurar a strategy para isso a gente cria um novo arquivo dentro da pasta auth chamado jtw.strategy.ts
+porque o passport que iremos usar possi varias estategias que séao formas de autenticar o usuario. uma delas é a jwt. então nesse arquivo a gente vai criar a estrategia jwt de autenticação
+a gente vai instalar o passport-jwt e sua tipagem
+npm i passport-jwt
+npm i @types/passport-jwt -D
+
+e ai no arquivo jwt.strategy a gente vai exportar a classe JwtStrategy que vaio extender PassportStrategy (que vamos importar) e passando para ele o strategy que tambem vamos importar
+import { PassportStrategy } from '@nestjs/passport'
+import { Strategy } from 'passport-jwt'
+
+export class JwtStrategy extends PassportStrategy(Strategy) {}
+
+agora dentro da classe a gente vai passar o constructor e a gente vai precisar usar env então a gente vai passar para o constructor o config sendo configService<Env>, true e pegamos a publickey usando o config get
+   constructor(config: ConfigService<Env, true>){
+        const publicKey = config.get('JWT_PUBLIC_KEY', {infer: true})
+    }
+
+    a gente usa a public pa para validar a gente consegue apenas com a public a private é apenas para gerar novos tokens
+    então não precisamos da private
+
+apos isso a gente chama o super que vai chamar o constructor da classe passportStrategy e a gente vai passar para ele alguns parametros
+o primeiro vai ser o jwtFromRequest e ele vai receber segundo a propria documentação do nest a definição de ExtractJWT que vamos importar e dele a gente da um . e pegafromAuthheaderandbarertoken
+per({
+            jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken()
+        })
+    }
+    a gente poderia pegar o token de varios lugares, como do body ou outros; mas nesse caso a gente pega do header que éo mais comum
+    a segunda config q iremos passar é a secretOrKey que vai ser a publicKey porem como ela esta em base64 a gente faz o processo do buffer
+       secretOrKey: Buffer.from(publicKey, 'base64'),
+
+       e por ultimo vamos passar o algoritm
+       e para ele a gente tem que passar um array com dentro o rs256
+       o total fica assim:
+       import { ConfigService } from '@nestjs/config'
+import { PassportStrategy } from '@nestjs/passport'
+import { ExtractJwt, Strategy } from 'passport-jwt'
+import { Env } from 'src/env'
+
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(config: ConfigService<Env, true>) {
+    const publicKey = config.get('JWT_PUBLIC_KEY', { infer: true })
+
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      secretOrKey: Buffer.from(publicKey, 'base64'),
+      algorithms: ['rs256'],
+    })
+  }
+}
+
+agora que o constructor esta configurado a gente vai fora dele criar um metodo chamado validate esse metodo vai ser opcional e o foco dele é validar que o token enviado seja realmente feito pela nossa chave
+e que ele possua as informações dentro do payload necessarias para que a nossa aplicação funcione
+entéao vamos fazer antes disso um const tokenSchema = para validar as informações por enquanto nos so temos um sub entéao é isso que vai ter la e ela é uma string que é um uuide tabem fazermo o nosso type para inferir o type desse esauema de validação
+então antes da classe a gente coloca isso:
+const tokenSchema = z.object({
+  sub: z.string().uuid(),
+})
+const tokenSchema = z.object({
+  sub: z.string().uuid(),
+})
+
+type TokenSchema = z.infer<typeof tokenSchema>
+
+e agora a gente faz o nosso async validate a gente passa o payload como tokenSchema e dentro da função a gente retorna o tokenSchema.parse passando o payload. ai se o payload não tiver o id do usuario ele vai dar erro
+como essa classe vai ser um provider a gente precisa colocar nela o decorator @injectable se não ela não vai ser injetada
+o strategy total fica assm:
+import { ConfigService } from '@nestjs/config'
+import { PassportStrategy } from '@nestjs/passport'
+import { ExtractJwt, Strategy } from 'passport-jwt'
+import { Env } from 'src/env'
+import { z } from 'zod'
+
+const tokenSchema = z.object({
+  sub: z.string().uuid(),
+})
+
+type TokenSchema = z.infer<typeof tokenSchema>
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(config: ConfigService<Env, true>) {
+    const publicKey = config.get('JWT_PUBLIC_KEY', { infer: true })
+
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      secretOrKey: Buffer.from(publicKey, 'base64'),
+      algorithms: ['RS256'],
+    })
+  }
+
+  async validate(payload: TokenSchema) {
+    return tokenSchema.parse(payload)
+  }
+}
+
+
+agora para a gente garantir que uma rota seja protegia a gente vai no controller que queremos proteger o createQuestion e vamos logo antes da classe passar o decorator @UseGuardse e passamos o guard que é AuthGuard que importamos do nest passport e passamos coo parametro a strategy que é a jwt
+
+@Controller('/questions')
+@UseGuards(AuthGuard('jwt'))
+export class CreateQuestionController {
+  esse jwt que a gente passa quer dizer que nos queremos usar a estrategia passportJWT que a gente usa no nosso arquivo de strategy.
+  porem faltou cadastrar o strategy que a gente criou no module, então por enquanto o nest nem sabe que ele existe.
+  entéao a gentevai la no autModule e depois de todos os imports a gente passa providers e para ele um array com o JwtStrategy
+  import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { Env } from 'src/env'
+import { JwtStrategy } from './jtw.strategy'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      global: true,
+      async useFactory(config: ConfigService<Env, true>) {
+        const privateKey = config.get('JWT_PRIVATE_KEY', { infer: true })
+        const publicKey = config.get('JWT_PUBLIC_KEY', { infer: true })
+
+        return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+        }
+      },
+    }),
+  ],
+  providers: [JwtStrategy],
+})
+export class authModule {}
+
+com tudo isso em mãos a gente pode voltar para o createQuestionController que por enquanto esta assim, a gente adicionou um ok so para a função handle não ficar dando erro:
+import { Controller, Post, UseGuards } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { AuthGuard } from '@nestjs/passport'
+
+@Controller('/questions')
+@UseGuards(AuthGuard('jwt'))
+export class CreateQuestionController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  async handle() {
+    return "ok"
+  }
+}
+
+agora a gente vai la no clientHTTP e se a gente passar autorization bearer e o numero do token ele ja funciona.
+porem a gente não vai ficar a cada vez copiando o numero do token para cada rota (por enquanto so tem uma) então uma coisa que angete pode fazer é la em cima na pagina @AuthToken = e aqui copiar  numero do token e ai na passagem a gente vai passar o authToken para todas as authorizations e ai vai funcionar tambem./
+ficaria assim mas sem o numero do token copiado porque eu ainda não fiz a requisição
+@baseUrl = http://[::1]:3333
+@AuthToken = token
+
+# @name create_account
+POST {{baseUrl}}/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@rei7.com",
+    "password": "123456"
+}
+
+###
+
+# @name autenticate
+POST {{baseUrl}}/sessions
+Content-Type: application/json
+
+{
+    "email": "iuri@reis.com",
+    "password": "123456"
+}
+
+###
+
+# @name create-question
+POST {{baseUrl}}/questions
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}
+
+so que mais legal do que isso seria ao invez de passar o numero do token e ter que passar um novo sempre que ele exprizasse a gente pode usar o formato de variavel ou seja {{}} quando a gente vai definir o token e ai dentro a gente pode pegar varias coisas cada requisição que a gente fez tem um nome então a gente pode ir e pegar algo de dentro da nossa requisição de autenticate, então a gente pega da resposta dessa requisição. o body e do body o acess_token
+@AuthToken = {{{{autenticate.response.acess_token}}}}
+e ele fica dizendo que a autenticate ainda não foi enviada.entéao quando a gente fizer uma requisição de autenticate ele ja salva automaticamente o access_token nessa vatiavel authToken e usa e assim podemos deixar pre prenchido em todos os lugares que a gente precisa. lembrar de sempre separar as requisições com ###
+fica assim:
+@baseUrl = http://[::1]:3333
+@AuthToken = {{{{autenticate.response.acess_token}}}}
+
+# @name create_account
+POST {{baseUrl}}/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@rei7.com",
+    "password": "123456"
+}
+
+###
+
+# @name autenticate
+POST {{baseUrl}}/sessions
+Content-Type: application/json
+
+{
+    "email": "iuri@reis.com",
+    "password": "123456"
+}
+
+###
+
+# @name create-question
+POST {{baseUrl}}/questions
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}
+
+e ai ja funciona porem podemos ainda melhorar talvez todo o esquema criando um novo arquvo no auth chamado jwt-auth.guard.ts e nele criar uma classe JwtAuthGuard que vai extender o authguard passando o parametro Jwt e ela nem precisa ter nenhuma implementação
+e agora na nossa createquestion a gente pode passar para o decoratos simplismente essa classe no lugar de como a gente fazia antes. é meio inutil mas é legal para ver como funciona o uso de classes
+a jwtauthguard fica assim:
+import { AuthGuard } from '@nestjs/passport'
+
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+
+
+a create question fica assim:
+import { Controller, Post, UseGuards } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  async handle() {
+    return 'ok'
+  }
+}
+
+
+eu tive alguns erros nesses para validar. mas eu ja corrigi (acho que em todos os colados aqui) os erros eram que no arquivo de http client eu não estava separando as requisições com ### e tambem quando eu definia o algorithm no strategy eu tinha colocado o rs em minusculo. tem que colocar em maisuculo. tambem no authModule a gente estava exportando semo Auth em maisuclo eu acho que isso não estava dando erro mas mesmo assim eu mudei isso no arquivo e tambem no modules que recebe ele.
 
