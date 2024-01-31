@@ -1675,4 +1675,132 @@ export class CreateQuestionController {
 
 
 eu tive alguns erros nesses para validar. mas eu ja corrigi (acho que em todos os colados aqui) os erros eram que no arquivo de http client eu não estava separando as requisições com ### e tambem quando eu definia o algorithm no strategy eu tinha colocado o rs em minusculo. tem que colocar em maisuculo. tambem no authModule a gente estava exportando semo Auth em maisuclo eu acho que isso não estava dando erro mas mesmo assim eu mudei isso no arquivo e tambem no modules que recebe ele.
+## decorator de autenticidade
+agora que a gente ja valida que o usuario foi autenticado a gente vai precisar agora é buscar os dados do usuario atravez do token no controller no caso no createquestion
+uma das coisas que a gente pode fazer é na função handle passar para ela um decorator, a gente tem varios decorators que a gente pode usar para diversos motivos nas funções a gente pode passar o body, o params, entre outros no nosso caso a gente vai usar o @Request para pegar o request (podemos usar tambem o @Req ambos são iguais) o tipo que vamos usar para isso a gente pode usar o tipo Request que a gente vai pegar do express e como vamos usar o tipo Request do express que é o mesmo nome do Request do decarator a gente usa apenas Req para o decorator para não dar erro.
+e ai dentro do request a gente pode pegar os dados do usuario usando o request.user como a gente fez nesse console.log.
+eu coloquei o type na importação do request do express porque a rockesteat tambem colocou mas néao seiu se é mesmo necessario , pelo visto o type faz o codigo ficar mais rapido porque o typescript vai detectar que não vai precisar de todo o request e apenas de usar ele como um tipo.
+import { Controller, Post, Req, UseGuards } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import type { Request } from 'express'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  async handle(@Req() request: Request) {
+    console.log(request.user)
+    return 'ok'
+  }
+}
+
+se  a gente rodar o codigo agora. vai aparecer no console.log o sub que é o id do usuario. ou seja a gente ja consegue pegar o id do usuario e com isso se a gente precisar de mas coisa a gente pega ele no banco de dados.
+porem para melhorar isso e não precisar importar a tipagem do express nem nada, a gente pode criar um decorator especial apenas para pegar os dados do usuario.
+na pasta auth a gente vai criar um arquivo chamado current-user-decorator.ts e nele a gente faz uma const CurrentUser com letra maiuscua porque como ele é um decorator ele vai ser usado assim @CurrentUser
+e essa const vai ser igual aalgo que vem do nest que é o creatParamDecorator a gente usa o param porque estamos criando um decorator para um parametro e não para uma classe
+e para isso a gente vai colocar dentro dele uma função que recebe em primeiro parametro da função os parametros que nos queremos enviar para o decorator então se a gente colocar @CurrentUser('oque a gente colocar aqui como o sub para pegar o id') o que a gente passar como parametro na chamada do decorator a gente pode pegar como parametro no primeiro parametro da arrowfunciton que vai estar dentro dessa criação de decorator. como no nosso caso não vai ter nada a gente passa um _:never para dizer que nunca vai ter nada
+o segundo parametro ja é um que vai acontecer sempre que é o context e ele vai ser o execute context que é o contexto de nossa requisição entéao a gente consegue pegar a classe que esse decorator foi chamado, o metodo, os argumentos e etc. fica asism
+import { createParamDecorator, ExecutionContext } from '@nestjs/common'
+
+export const CurrentUser = createParamDecorator(
+  (_: never, context: ExecutionContext) => {},
+)
+
+e agora com esse context a gente pode pegar usando o switchtoHTTP a requisição então fazermos uma const request = context.switchToHttp().getRequest() e dai a gente ja tem o user. se a gente fizer depois return request.user
+import { createParamDecorator, ExecutionContext } from '@nestjs/common'
+
+export const CurrentUser = createParamDecorator(
+  (_: never, context: ExecutionContext) => {
+    const request = context.switchToHttp().getRequest()
+
+    return request.user
+  },
+)
+
+so que o user ainda esta como any. então podemos mehorar isso
+a gente pode colocar o request.user as TokenSchema que foi o que a gente criou de type la no strategy. mas para isso a gente te que ir no arquivo de strategy e exportar esse type
+
+export type TokenSchema = z.infer<typeof tokenSchema>
+
+porem para ficar mais semantico vamos trocar os nomes para tokenPayloadSchema e no type apenas UserPayload a pagina de strategy fica assim:
+
+import { Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { PassportStrategy } from '@nestjs/passport'
+import { ExtractJwt, Strategy } from 'passport-jwt'
+import { Env } from 'src/env'
+import { z } from 'zod'
+
+const tokenPayloadSchema = z.object({
+  sub: z.string().uuid(),
+})
+
+export type UserPayload = z.infer<typeof tokenPayloadSchema>
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(config: ConfigService<Env, true>) {
+    const publicKey = config.get('JWT_PUBLIC_KEY', { infer: true })
+
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      secretOrKey: Buffer.from(publicKey, 'base64'),
+      algorithms: ['RS256'],
+    })
+  }
+
+  async validate(payload: UserPayload) {
+    return tokenPayloadSchema.parse(payload)
+  }
+}
+
+e la no decorator que estamos criando vamos usar tambem o userPayload
+import { createParamDecorator, ExecutionContext } from '@nestjs/common'
+import { UserPayload } from './jtw.strategy'
+
+export const CurrentUser = createParamDecorator(
+  (_: never, context: ExecutionContext) => {
+    const request = context.switchToHttp().getRequest()
+
+    return request.user as UserPayload
+  },
+)
+
+
+e agora ao invez de usar @Req na nossa createQuestionController a gente pode usar o @CurrentUser e podemos pegar o user com o tipo TokenPayload de la fica assim:
+  async handle(@CurrentUser() user: UserPayload) {
+
+    agora temos alguns erros na formataçéao da função prque estamos usando request, mas agora a gente pode usar diretamente o user sem precisar do request.user
+    a pagina fica assim:
+    import { Controller, Post, UseGuards } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { CurrentUser } from 'src/auth/current-user-decorator'
+import { UserPayload } from 'src/auth/jtw.strategy'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  async handle(@CurrentUser() user: UserPayload) {
+    console.log(user)
+    return 'ok'
+  }
+}
+
+e agora se a gente der a requisição vai mostrar o id do usuario e ja ta tipado se a gente der um user. ele ja da a opçéao de user.sub
+
+
+e agora a gente pode usar ele o nosso decorator e podemos ter acesso ao id do usuarion dentro dos controlers.
+enviei a requisiçao e funcionoiu assim
+{ sub: 'bbcbf8f5-da19-44bc-8e71-458977e63994' }
+ta funcionando
+
+
+
 
