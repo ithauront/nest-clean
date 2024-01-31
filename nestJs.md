@@ -1797,9 +1797,203 @@ e agora se a gente der a requisição vai mostrar o id do usuario e ja ta tipado
 
 
 e agora a gente pode usar ele o nosso decorator e podemos ter acesso ao id do usuarion dentro dos controlers.
-enviei a requisiçao e funcionoiu assim
+enviei a requisiçao e funcionoiu assim o console log
 { sub: 'bbcbf8f5-da19-44bc-8e71-458977e63994' }
 ta funcionando
+
+# controller de criaçao de pergunta finalizacao
+vamos copiar a parte de validaçao que a gente tinha feito no zod para a create account e vamos colar nele mudando o nome de create account schema para  create question body schema importamos o zod e para criar uma pergunta vamos mudar o esquema de validação vamos pegar apenas o titulo e o conteudo
+
+import { z } from 'zod'
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+})
+
+type CreateQuestionBodySchema = z.infer<typeof createQuestionBodySchema>
+
+e agora ndentro da classe a gente pega o body com o decorator e passamos o CreateQuestionBodySchema como type dentro dos parametros da post handle
+ @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body() body: CreateQuestionBodySchema,
+  ) {
+    e ate o momento a gente passaria o UsePipes e o nosso validationPipe entre o @post e o async handle
+    mas tem uma outra forma de fazer isso que é a seguinte
+    dentro do @Body(aqui) a gente pode passar o new ZodValidationPipes( e qaui passar nosso scheme)
+    ficaria assim:
+      @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(new ZodValidationPipe(createQuestionBodySchema))
+    body: CreateQuestionBodySchema,
+  ) {
+    para não quevrar em duas linhas a gente pode fazer uma const emcima para ser bodyValidationPipe = new ValidationPipe(createQuestionBodySchema) e a gente passaria ela para o body. fica assim a pagina
+import {
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+  ValidationPipe,
+} from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { CurrentUser } from 'src/auth/current-user-decorator'
+import { UserPayload } from 'src/auth/jtw.strategy'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+import { ZodValidationPipe } from 'src/pipes/zod-validation-pipe'
+import { z } from 'zod'
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(createQuestionBodySchema)
+
+type CreateQuestionBodySchema = z.infer<typeof createQuestionBodySchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(private jwt: JwtService) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: CreateQuestionBodySchema,
+  ) {
+    console.log(user)
+    return 'ok'
+  }
+}
+
+agora no lugar do console.log a gente vai fazer uma const para desestruturar do body o title  o content
+a gente coloca o prisma no nosso cosntructor usando o prismaService 
+e agora a gente pega o await this.prisma.questions.create() e passamos para o create um objeto e dentro dele um data que vai ter o title e content e o slug que é obrigatorio tambem
+vamos tambem logo abaido da const que pega o title e content fazer uma const userId = user.sub
+assim temos acesso a userId
+e ai a gente passa no author id o user id
+para o slug a gente vai pedir ao chatgpt para fazer uma função para a gente que converta uma string em um slug tirando os acentos ele da isso
+function convertToSlug(text: string): string {
+    // Normalize the string to remove accents and other diacritics
+    const normalizedText = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    // Convert the string into slug format: lowercase, hyphens instead of spaces, remove non-alphanumeric characters
+    return normalizedText
+        .toLowerCase() // Convert to lowercase
+        .trim() // Remove leading and trailing spaces
+        .replace(/\s+/g, '-') // Replace spaces with hyphens
+        .replace(/[^\w\-]+/g, '') // Remove all non-word characters
+        .replace(/\-\-+/g, '-'); // Replace multiple hyphens with a single hyphen
+}
+
+
+vamos copiar isso na nossa pagina tirando os comentarios e transformando em metodo ou seja tirando o funcion ai fica sendo um metodo e vamos colocar ele como privado e ai a gente pode usar esse metodo para converter o title to slug mas isso vai ser so por enquanto. mais para frente vamos dar outro jeito
+o regex que ele criou não estava tão bom então apos melhorar um pouco ficou assim:
+import {
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+  ValidationPipe,
+} from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { CurrentUser } from 'src/auth/current-user-decorator'
+import { UserPayload } from 'src/auth/jtw.strategy'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+import { ZodValidationPipe } from 'src/pipes/zod-validation-pipe'
+import { PrismaService } from 'src/prisma/prisma.service'
+import { z } from 'zod'
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(createQuestionBodySchema)
+
+type CreateQuestionBodySchema = z.infer<typeof createQuestionBodySchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(
+    private jwt: JwtService,
+    private prisma: PrismaService,
+  ) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: CreateQuestionBodySchema,
+  ) {
+    const { title, content } = body
+    const userId = user.sub
+    const slug = this.convertToSlug(title)
+
+    await this.prisma.question.create({
+      data: {
+        authorId: userId,
+        title,
+        content,
+        slug,
+      },
+    })
+  
+  }
+
+  private convertToSlug(title: string): string {
+    return title
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+  }
+}
+ai ja temos a pagina toda inclusive com o uso do slug correto
+porem o slug é unico ent#oa temos que tomar cuidado porque se a gente cadastrar duas perguntas com o mesmo titulo por enquanto ele vai usar o mesmo slug e vai dar erro note tamem que tiramos o return porque como é uma criação não tem muito porque ele dar um return. com isso pronto vamos no client.http para testar vamos enviar um body na reuisição de criação de pergunta. a pagina client.http fica asim:
+@baseUrl = http://[::1]:3333
+@AuthToken = {{autenticate.response.body.acess_token}}
+
+# @name create_account
+POST {{baseUrl}}/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@rei7.com",
+    "password": "123456"
+}
+
+###
+
+# @name autenticate
+POST {{baseUrl}}/sessions
+Content-Type: application/json
+
+{
+    "email": "iuri@rei.com",
+    "password": "123456"
+}
+
+###
+
+# @name create-question
+POST {{baseUrl}}/questions
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}
+
+{
+    "title": "Nova Pergunta",
+    "content": "essa é a nova pergunta"
+}
+
+se a gente der um send request ele devlve 201 significa que criou.
+
+
+
 
 
 
