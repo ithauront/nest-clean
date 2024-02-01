@@ -2144,10 +2144,123 @@ Authorization: Bearer {{AuthToken}}ou até sem passaro page ele deve mostrar a q
 e se a gente passar page 2  ou 3 ele deve mostrar uma outra questão.
 esta fiuncionando.
 
+## configurar test usando vitest
+o nest por padrão usa o jest mas a gente pode configurar para ser o vitest
+por padrão o nest compila todo o codigo do typescript para o javascript pela cli do typescript mas isso é um processo bem lento
+se a gente quier mudar isso a propria dcumentação do nest recomenda mudar para o swc e é isso que a gente vai fazer
+vamos começar instaladno algumas ferramentas
+npm i vitest unplugin-swc @swc/core @vitest/coverage-v8 -D
+agora nos vamos criar um arquivo na raiz chamado vitest.config.ts
+e a gente joga nele esse codigo:
+import swc from 'unplugin-swc'
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    globals: true,
+    root: './',
+  },
+  plugins: [
+    swc.vite({
+      module: { type: 'es6' },
+    }),
+  ],
+})
+
+agora nos bamos instalar um pacote que chama 
+npm i vite-tsconfig-paths -D
+com isso a gente pode ir no nosso tsconfig e definir os caminhos dos testes
+então abrimos o arquivo tsConfig.json e neme a gente passa o paths assim:
+"paths": {
+      "@/*":["./src/*"]
+    }
+assim ele redireciona o que é @/ para ./src/
+
+ai agora com o tsconfigPaths a gete pode usar essa configuração agora nos arquivos do vitest então vamos la no arquiov de vitest.config e importamos o tsconfig tepaths
+e a gete passa ele nos plugins assim:
+
+import swc from 'unplugin-swc'
+import { defineConfig } from 'vitest/config'
+import tsConfigPaths from 'vite-tsconfig-paths'
+
+export default defineConfig({
+  test: {
+    globals: true,
+    root: './',
+  },
+  plugins: [
+    tsConfigPaths(),
+    swc.vite({
+      module: { type: 'es6' },
+    }),
+  ],
+})
+
+como geralmente os testes end to end e os testes unitarios tem configurações diferentes a gente vai criar um arquivo de config para ele  então vamos na raiz do projeto e criamos um arquivo chamado vitest.config.e2e.ts
+nesse aruivo a gente copaia o outro porem dentro de test a gente passa um include para esse qrquivo de configuração do vitest pegar todos com a terminação e2e-spec
+import swc from 'unplugin-swc'
+import { defineConfig } from 'vitest/config'
+import tsConfigPaths from 'vite-tsconfig-paths'
+
+export default defineConfig({
+  test: {
+    include: ['**/*.e2e-spec.ts'],
+    globals: true,
+    root: './',
+  },
+  plugins: [
+    tsConfigPaths(),
+    swc.vite({
+      module: { type: 'es6' },
+    }),
+  ],
+})
+
+por enquanto é isso depois a gente vai especificar melhor.
+agora podemos ir fazer os nossos scripts
+"test" : "vitest run",
+    "test:watch" : "vitest",
+    "test:cov": "vitest run --coverage",
+    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "test:debug": "vitest run --inspect-brk --inspect --logHeapUsage --threads=false"
+vamos de volta no tsconfig .json para passar o test e etc como global para a gente não precisar importar
+e tambem mudamos o target do letra maiuscula para moinuscula para os testes funcionar
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "es2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "forceConsistentCasingInFileNames": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "@/*":["./src/*"]
+    },
+    "types": ["vitest/globals"]
+
+  }
+}
 
 
-
-
+    agora vamos na pasta de controlers para criar o nosso primeiro teste
+    create-account-controller.e2e-spec.ts
+se a gente criar um teste basico so para ver se a config esta funcionando assim no arquivo e2e
+test('1+1', () => {
+  expect(1 + 1).toBe(2)
+})
+e rodar o npm run test:e2e ele passa então a config fucnionou
 
 
 
