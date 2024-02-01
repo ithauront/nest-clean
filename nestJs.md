@@ -1992,6 +1992,162 @@ Authorization: Bearer {{AuthToken}}
 
 se a gente der um send request ele devlve 201 significa que criou.
 
+# rota de listage de perguntas
+vamos criar um novo arquivo na pasta de controller chamado fetch-recent-questions.controller.ts
+e vamos colar nele o codigo do createquestion e vamos mudar umas coisas, vams tirar logo o codigo de transformação para o slug
+mudamos o medoto para get podemos tirar o currentUser e podemos tirar toda a logica tambem. fica assim
+import { Controller, Get, UseGuards } from '@nestjs/common'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+import { PrismaService } from 'src/prisma/prisma.service'
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class FetchRecentQuestionsController {
+  constructor(private prisma: PrismaService) {}
+
+  @Get()
+  async handle() {}
+}
+ e vamos la no app.module e passamos o FetchRecentQuestionsController la tambem.
+
+agora voltamos ara o controller e a logica vai ser. vamos criar uma const para questions e el vai ser o await this.prisma.question.findMany assim ele vai pegar varios e dentro disso a gente passa o orderBy e a gente passa para o orderby o createdAt e pede para vir em ordem decrescente (la ja tem o enum de crescente e decrescente ) fica assim:
+import { Controller, Get, UseGuards } from '@nestjs/common'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+import { PrismaService } from 'src/prisma/prisma.service'
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class FetchRecentQuestionsController {
+  constructor(private prisma: PrismaService) {}
+
+  @Get()
+  async handle() {
+    const questions = await this.prisma.question.findMany({
+      orderBy: { createdAt: 'desc' },
+    })
+    return { questions }
+  }
+}
+
+com isso salvo a gente vai la no client.http para criar uma nova requisição
+e
+a requisição a gente quer que a gente possa enviar a paginação usando o ?page=2 ou 1 no nosso caso a gente vai enviar 1 para néao dar erro. e claro que aqui a gente vai definir que o query vai ter nome de page
+para 
+
+# @name fetch-recent-questions
+GET {{baseUrl}}/questions?page=1
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}
+
+para a gente definir isso a gente volta la no nosso fetch recent questions
+dentro dos parametros do handle a gente passa o decorator @Querry('aqui botamos o nome que quermos definir no caso page)  depois passamos page:nummber para saber que é numero.
+  async handle(@Query('page') page: string) {
+o page sempre vai vir como string a menos que a gente faça alguma validação por isso deixamos string nele.
+porem o query pode receber um pipe para fazer validação então vamos criar antes de tudo uma const queryValidationPipe = ZodValidationPipe() e esse zodvalidationpipe vai receber um schema 
+então vamos criar um schema vai começar como um z.string porque todo queryparametro é string, depois a gente diz que é opcional e que o default é 1 e depois a gent transfrma para numero. mas ai a gente quer quer nunca de um numero negativo e para isso a gente z um pipe para ele ja dizer que tudo que a gente passou foi validado. e ai a gente faz uma nova validação dentro do pipe apartir da trasnformação do numero então vai ser Z.number e o min 1
+fica assim
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+com isso a gente ja poderia passar o page como number mas a gente pode fazer o type inferindo assim
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+e agora passamos esse type para o page
+
+@Get()
+  async handle(@Query('page', queryValidationPipe) page: PageParamsTypeSchema) {
+agora fazemos uma const chamada perPage para definir quantos registros queremos mostrar por pagina e dizemos que & 1
+agora vamos definir a paginação a gente vai dentro do objeto do findMany
+e define take: perPage para dizer que vamos retornar 1 item 
+ e damos um skip page -1 * perPage para dizer que ele vai pular do numero definido no perPage para ir para a proxima pagina.
+ a pagina fica assim porem da um erro na requisição porque ele diz que falta o skip
+ import { Controller, Get, Query, UseGuards } from '@nestjs/common'
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard'
+import { ZodValidationPipe } from 'src/pipes/zod-validation-pipe'
+import { PrismaService } from 'src/prisma/prisma.service'
+import { z } from 'zod'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class FetchRecentQuestionsController {
+  constructor(private prisma: PrismaService) {}
+
+  @Get()
+  async handle(@Query('page', queryValidationPipe) page: PageParamsTypeSchema) {
+    const perPage = 1
+    const questions = await this.prisma.question.findMany({
+      take: perPage,
+      skip: (page - 1) * perPage,
+      orderBy: { createdAt: 'desc' },
+    })
+    return { questions }
+  }
+}
+
+
+o erro era por conta da nossa calidação do zod, que não é apenasuma validaçéao nesse caso. a gente faz uma transformação
+e ai no nosso zodValidationParse a gente faz so a validação e não a transformação tambem. para fazer a transformação tambem a gente precisa ir no arquivo zodValidationPipe e retornar o valor ou seja esse try no arquivo do zod validation pipe
+
+  transform(value: unknown) {
+    try {
+      this.schema.parse(value)
+    } catch (error) {
+
+      precisa ser return this.schema.parse(value)
+ou seja o qrtuivo de fetchrecentquestion esta certo mas a gente tinha que alterar isso no zodValidation. e ai podemos tirar o return value do fim porque ele fica unreachable.
+ai o arquivo de zod validation fica assim e ai deve rodar a paginaçéao
+import { BadRequestException, PipeTransform } from '@nestjs/common'
+import { ZodError, ZodSchema } from 'zod'
+import { fromZodError } from 'zod-validation-error'
+
+export class ZodValidationPipe implements PipeTransform {
+  constructor(private schema: ZodSchema) {}
+
+  transform(value: unknown) {
+    try {
+      return this.schema.parse(value)
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({
+          message: 'Validation failed.',
+          statusCode: 400,
+          errors: fromZodError(error),
+        })
+      }
+      throw new BadRequestException('Validation failed.')
+    }
+  }
+}
+
+agora se a gente criar duas ou tres questoes e a gente fizer a requisição assim
+# @name fetch-recent-questions
+GET {{baseUrl}}/questions?page=1
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}ou até sem passaro page ele deve mostrar a questao mais recente
+e se a gente passar page 2  ou 3 ele deve mostrar uma outra questão.
+esta fiuncionando.
+
+
+
+
+
 
 
 

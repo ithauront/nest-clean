@@ -1,10 +1,4 @@
-import {
-  Body,
-  Controller,
-  Post,
-  UseGuards,
-  ValidationPipe,
-} from '@nestjs/common'
+import { Body, Controller, Post, UseGuards } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { CurrentUser } from 'src/auth/current-user-decorator'
 import { UserPayload } from 'src/auth/jtw.strategy'
@@ -47,7 +41,6 @@ export class CreateQuestionController {
         slug,
       },
     })
-    return 'ok'
   }
 
   private convertToSlug(title: string): string {
