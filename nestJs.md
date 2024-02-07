@@ -2262,6 +2262,125 @@ test('1+1', () => {
 })
 e rodar o npm run test:e2e ele passa então a config fucnionou
 
+# banco de dados isolado nos testes
+teste end to end precisa ser o mais proximo possivel do ambiente real da aplicação então o ideal é usar o minimo de mocks possivel.
+então ao testar uma rota é legal a gente bater no banco de dados.
+pra isso o ideal é usarmos um banco de dados paralelo para não sujar o nosso banco de dados e não ter problema de repetição.
+da para fazer de varias formas vamos fazer de uma facil e que provavelmente vai ser compativel com novas atualizações.
+vamos no arquivo vitest.config.e2e.ts para configurar isso apenas para os testes e2e
+dentro da chave de test a gente vai passar um setupFiles
+que é um array e para esse array a vai passar './test/setup-e2e.ts'
+import swc from 'unplugin-swc'
+import { defineConfig } from 'vitest/config'
+import tsConfigPaths from 'vite-tsconfig-paths'
+
+export default defineConfig({
+  test: {
+    include: ['**/*.e2e-spec.ts'],
+    globals: true,
+    root: './',
+    setupFiles: ['./test/setup-e2e.ts'],
+  },
+  plugins: [
+    tsConfigPaths(),
+    swc.vite({
+      module: { type: 'es6' },
+    }),
+  ],
+})
+
+e vamos criar esse aruqivo na pasta de test. esse aruqivo vai ser agora chamado antes de cada arquivo de teste
+para testar se esta funcionando a gente pode colocar um console.log la dentro e rodar os testes e2e
+
+agora para confgurar esse arquivo. como ele não é parte do projeto do nest e sim apenas um arquivo do vitest ele néao vai ser capaz de pegar as nossas variaveis ambiente pelo config. e etc. então para esse caso especifico nos vamos instalar o dotenv
+npm i dotenv -D
+
+ai agora no arquivo a gente importa o dotenv/config
+para poder fazer a conexção com o banco de dados e depois pegamos logo o prisma
+const prisma = new PrismaClient()
+
+e agora nos podemos usar o before e afterall que são globais então nao precisa importar.
+import 'dotenv/config'
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+beforeAll(async () => {})
+
+afterAll(async () => {})
+
+
+nos vamos agora criar uma função chamada generateUniqueDatabaseURL que vai receber um schemaId que é uma string e dentro dessa função vamos criar uma exceção para se não for encontrado no env uma databaseURL usando um if
+if (!process.env.DATABASE_URL) {
+  throw new Error('Please provide a DATABASE_URL environment variable')
+}
+isso porque nos queremos usar a variavel de conexção que o usuario ja tem mas mudarmos o schema no final porque no postgress a gente pode mudar o schema pra criar subdicição no mesmo banco de dados. depois a gente vai pegar a url do process env e agora a gente faz um searchparams nessa url e faz um set para mudar o que vem no schema por schemaId que a gente recebe na fucnção e depois damos um retorno na url fazendo ela virar string de novo com o toString()
+function generateUniqueDatabaseURL(schemaId : string) {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('Please provide a DATABASE_URL environment variable')
+  }
+
+  const url = new URL(process.env.DATABASE_URL)
+
+  url.searchParams.set('schema', schemaId)
+
+  return url.toString()
+}
+
+ou seja com isso a gente substitui uma parte da string da url que define o schema com o schemaId que a gnete jogar nessa função que pode ser por exemplo um uuid
+agora o que a gente faz é no beforeAll a gente da um const databaseUrl = e joga nela a finção passando um ramdom que vei do node:crypto e para testar q gente da um consoleLog nela e ver se esta funcionando:
+beforeAll(async () => {
+  const databaseUrl = generateUniqueDatabaseURL(randomUUID())
+  console.log(databaseUrl)
+})
+agora que sabemos que funciona podemos tirar o console.log e no lugar dele a gente sobescreve dentro do process.env a nossa DATABASE_URL 
+  process.env.DATABAS_URL = databaseUrl
+  como isso esta rodando antes do teste uando o teste for executar ele vai pegar essa url de coneção que a gente criou e não a tradicional e depois disso a gente tem que rodar as migrations pqvai ser um database novo então a gente usa o comando execSync()
+  passando o comando das migrations mas usando o deploy e não o dev porque o deploy so vai ler as migrations sem ver se tem um schema ou algo assim:
+  execSync('npm prisma migration deploy')
+
+  agora ao rodar o teste ele cria um novo banco para isso.
+
+  agora apos de todos os testes a gente vai deletar esse banco que a gente criou.
+  então a gente vai no afterAll e da um await prisma para pegar a conexão que a gente fez quando instanciamos o prisma e damos um executeRawUnsafe pq como vamos deletar um banco que é algo perigoso ele tem essa verificação e sabe que vai ser algo não seguro.
+  e a gente da como comando o DROP SCHEMA IF EXISTS "${aqui comlocamos o nome do banco}" a gente coloca o if exists apenas como verificação para ele não tentar deletar algo se ele ja não existir mais.
+  e passamos o id do schema. porem como a gente não sabe qual é o id ao invez de gerar ele dentro da chamada da função a gente coloca ele fora como um schemaId= radomUUID() e ai a chente passa o schema id
+    await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaId}" CASCADE`)
+    e a opção cascade para que ele delete tudo que depende desse schema.
+    ai depois a gente da um prisma disconect
+    fica assim:
+    import 'dotenv/config'
+import { PrismaClient } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
+import { execSync } from 'node:child_process'
+
+const prisma = new PrismaClient()
+
+function generateUniqueDatabaseURL(schemaId: string) {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('Please provide a DATABASE_URL environment variable')
+  }
+
+  const url = new URL(process.env.DATABASE_URL)
+
+  url.searchParams.set('schema', schemaId)
+
+  return url.toString()
+}
+const schemaId = randomUUID()
+beforeAll(async () => {
+  const databaseUrl = generateUniqueDatabaseURL(schemaId)
+  process.env.DATABAS_URL = databaseUrl
+
+  execSync('npm prisma migration deploy')
+})
+
+afterAll(async () => {
+  await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaId}"`)
+  prisma.$disconnect()
+})
+
+detalhe que a gente usa o before all ou seja a ente cria o banco de dados antes de rodar todos os testes de um atrquivo e néao um beforeeach que criaria um novo a cada teste so que isso gastaria muito mais tempo para realizar os testes. entéao a gente tem que tomar cuidado com isso de que no arquivo total de testes esta usando o mesmo banco de dados. e a gente tem que criar nossos testes pensando nisso.
 
 
 
