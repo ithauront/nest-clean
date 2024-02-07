@@ -2370,17 +2370,219 @@ function generateUniqueDatabaseURL(schemaId: string) {
 const schemaId = randomUUID()
 beforeAll(async () => {
   const databaseUrl = generateUniqueDatabaseURL(schemaId)
-  process.env.DATABAS_URL = databaseUrl
+  process.env.DATABASE_URL = databaseUrl
 
-  execSync('npm prisma migration deploy')
+  execSync('npx prisma migrate deploy')
 })
 
 afterAll(async () => {
-  await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaId}"`)
+  await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaId}" CASCADE`)
   prisma.$disconnect()
 })
 
 detalhe que a gente usa o before all ou seja a ente cria o banco de dados antes de rodar todos os testes de um atrquivo e néao um beforeeach que criaria um novo a cada teste so que isso gastaria muito mais tempo para realizar os testes. entéao a gente tem que tomar cuidado com isso de que no arquivo total de testes esta usando o mesmo banco de dados. e a gente tem que criar nossos testes pensando nisso.
+
+## criar os testes
+vamos criar o teste primeiro do create account controller vamos no arquivo e fazemos um describe para colocar o nome
+vamos instalar o supertest
+npm i supertest -D
+e os types dele
+npm i @types/supertest -D
+e vamos fazer o nosso teste colocando o nome
+e o test vai ser asyncrono
+describe('Create account tests (e2e)', () => {
+  test('[POST]/account', async () => {
+    
+  } )
+})
+
+porem antes do test a gente tem que fazer um beoreAll que ja é padrão e podemos achar na documentação do nest
+import { AppModule } from '@/app.module'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+
+describe('Create account tests (e2e)', () => {
+  let app: INestApplication
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    await app.init()
+  })
+
+  test('[POST]/account', async () => {})
+})
+
+com isso o que a gente faz para conseguir testar a aplicação a gente precisa subir a aplicação mas não usando um npm run start pq ai ele rodaria na porta 3333 e ficaria tambem ruim para rodar os testes em paralelo
+por isso a gente usa o createTestingModule que é uma forma de rodar ela sem rodar ela de verdade. a gente salva o app dentro dessa variavel e agora a gente pode fazer requisições usando o request do supertest e passamos para ele app.getHTTPserver
+ await request(app.getHttpServer())
+
+ agora a gente pode fazer requisições nisso ai como por exemplo no nosso caso vamos fazer uma post para accounts e enviar os dados que queremos e ai colocamos isso como sendo uma const response para poder usar ela no expect para ver se o statuscode dela é 201 a pagina fica assim:
+ import { AppModule } from '@/app.module'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+
+describe('Create account tests (e2e)', () => {
+  let app: INestApplication
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    await app.init()
+  })
+
+  test('[POST]/account', async () => {
+    const response = await request(app.getHttpServer()).post('/accounts').send({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(response.statusCode).toBe(201)
+  })
+})
+
+agora ja temos um teste criado. e como temos um ambiente isolado de testes que no fim do arquivo vai deletar o banco de dados a gente pode rodar esse teste varias vezes que não vai ter problema porque não vai ter email duplicado.
+
+mas para deixar o teste mais refinado e como é o end2end a gente pode fazer alguma operação para verificar se o usuario foi mesmo salvo no banco e dados. e podemos fazer isso usando o primsa. a gente pode importa o prisma pelo prismaClient e tal. porem podemos e vai ser mais simples usar a vantagem que o nosso appmodule ele usa o prismaService a gente pode pegar o prismaServide de dentro do app por dentro dos testes.
+la embaixo do let a gente faz um prisma: prismaService apenas para que ele fique visivel dentro dos testes
+a gente vai fazer  dentro do beforall depois do app o prisma = moduleRef.get(prismaService)
+e agora a gente ja pode usar o prisma dentro do nosso teste
+describe('Create account tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+
+    await app.init()
+  })
+
+
+agora a gente faz depois do nosso expect do test uma const para user sendo ela prisma.users.findUniwue onde o email é o email que a gente passou. e ai a gente pode fazer um expect disso para que seja truthy 
+o truhtu sgnifica que se ele n;éao achar ele retorna undefined ou nulo e não realmente false entéao o trhthy so ve se é um valor valido ou seja néão nulo ou undefined e isso ja valida suficiente para nos.
+a pagina fica assim:
+import { AppModule } from '@/app.module'
+import { PrismaService } from '@/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+
+describe('Create account tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+
+    await app.init()
+  })
+
+  test('[POST]/account', async () => {
+    const response = await request(app.getHttpServer()).post('/accounts').send({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(response.statusCode).toBe(201)
+
+    const userOnDatabase = prisma.user.findUnique({
+      where: {
+        email: 'jhon@doe.com',
+      },
+    })
+
+    expect(userOnDatabase).toBeTruthy()
+  })
+})
+
+com database rodando ela funciona.
+
+e agora vamos fazer o arquivo de teste de autenticare entéao criamos o arquivo
+autenticate-controller.e2e-spec.tsx e copiamos o nosso teste de create account nele
+
+agora nele a gente vai mudar pouca coisa.
+aa gente muda o describe para autenticate a gente muda o post para sessions
+a gente tira o name do response pq para autenticar a gente so manda email e senha
+e a gente cria um usuario no banco antes de autenticar porque ele precisa ser criado para ser autenticado então antes de mandar a const response a gente faz um await prisma.user.create({
+  data: e mandamos o nome email e password so que criando u o ussario assim a gente precisa mandar a senha ja hasheada então no password a gente faz um await hash que a gente pega do bcrypt e passa para ele a senha 123456  os rounds que são 8
+
+})
+
+agora a gente pode apagar a parte do userOnDatabase. a gente faz a const reponse tirando o name. e o expect tamem vai ser statuscode 201 e tambem podemos fazer um segundo expect para que dentro do body tenha o accesToken então a gente faz um expect response.body seja igual a gente coloca um objeto e dentro dele tendo um acces_token que seja xpect any(string ) assim:
+expect(response.body).toEqual({
+        access_token: expect.any(String)
+    })
+  })
+
+  a pagina completa fica assim:
+  import { AppModule } from '@/app.module'
+import { PrismaService } from '@/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+import { string } from 'zod'
+
+describe('Autenticate tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+
+    await app.init()
+  })
+
+  test('[POST]/sessions', async () => {
+    await prisma.user.create({
+      data: {
+        name: 'Jhon Doe',
+        email: 'jhon@doe.com',
+        password: await hash('123456', 8),
+      },
+    })
+
+    const response = await request(app.getHttpServer()).post('/sessions').send({
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.body).toEqual({
+      access_token: expect.any(String),
+    })
+  })
+})
+
+com isso ja criamos os testes de criação de conta e de autenticação.
+
 
 
 
