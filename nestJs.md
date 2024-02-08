@@ -2583,7 +2583,289 @@ describe('Autenticate tests (e2e)', () => {
 
 com isso ja criamos os testes de criação de conta e de autenticação.
 
+## testes e2e perguntas
+vamos agora criar os testes de perguntas
+vamos criar o create-question.controller.e2e-spec.ts
+vamos colar nele o teste de create account
+mudamos o describe para vreate question. o post é em /questions para criar a question a gente precisa mandar o titulo e o conteudo
+porem para criar a pergunta a gente precisa estar autenticado e para estar autenticado o usuario precisa existir então vamos pegar a parte de criação do usuario que tem no autenticate e colar la salvando ele em uma const user
+vamos la onde a gente tem os lets e colocar uma let jwt que vai ser o jwtService
+describe('Create questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let jwt: JwtService
 
+  e fazemos o moduleRef.get(jwtService) igual fazemos no prisma
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+porque é isso que vai gerar o token para nos
+então a gente vai depois da criação do usuario fazer uma const token e vamos passar para ela o jwtsing com o sub do userId
+fica assim a criação de usuario e do token:
+ test('[POST]/questions', async () => {
+    const user = await prisma.user.create({
+      data: {
+        name: 'Jhon Doe',
+        email: 'jhon@doe.com',
+        password: await hash('123456', 8),
+      },
+    })
+
+    const accessToken = jwt.sign({ sub: user.id })
+
+    se a gente quiser a gente podetirar o hash da senha. mas eu prefiro deixar.
+    agora que a gente tem o token. na hora que a gente for criar a pergunta a gente pode colocar um .set para ele mandar algo no header passamos uma string de Authorization para ele entender que é um header de autoriação passamos outa de bearer para ele saber que é esse tipo de autorização  e mandamos o accessToken assim a gente consegue criar a pergunta sem passar pela chamada de autentificação tradicional no banco de dados. pq a gente gera um token no proprio teste.
+    a criação da pergunta fica assim:
+    
+    const response = await request(app.getHttpServer())
+      .post('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Question',
+        content: 'This is the question',
+      })
+
+agora a gente espera que a resposta disso seja 201 
+e tambem vamos fazer uma verificação para ver se a pergunta esta no database./ a gente muda o nome da const e tambem de findunique para find first porque podem ter outras perguntas com o mesmo titulo.
+  expect(response.statusCode).toBe(201)
+
+    const QuestionOnDatabase = prisma.question.findFirst({
+      where: {
+        title: 'Question',
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeTruthy()
+  })
+
+  a pagina fica assim:
+  import { AppModule } from '@/app.module'
+import { PrismaService } from '@/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+
+describe('Create questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/questions', async () => {
+    const user = await prisma.user.create({
+      data: {
+        name: 'Jhon Doe',
+        email: 'jhon@doe.com',
+        password: await hash('123456', 8),
+      },
+    })
+
+    const accessToken = jwt.sign({ sub: user.id })
+
+    const response = await request(app.getHttpServer())
+      .post('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Question',
+        content: 'This is the question',
+      })
+
+    expect(response.statusCode).toBe(201)
+
+    const QuestionOnDatabase = prisma.question.findFirst({
+      where: {
+        title: 'Question',
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeTruthy()
+  })
+})
+
+
+agora vamos fazer o ultimo teste para pegar as questéoes recentes
+fetch-recent-questions.controller.e2e-spec.ts
+colmos o teste de create question nele
+# importante
+no controller de fetch questions a gente vai colocar 20 novamente para ele paginar or 20 fia assim:
+
+  @Get()
+  async handle(@Query('page', queryValidationPipe) page: PageParamsTypeSchema) {
+    const perPage = 20
+    const questions = await this.prisma.question.findMany({
+      take: perPage,
+      skip: (page - 1) * perPage,
+      orderBy: { createdAt: 'desc' },
+    })
+    return { questions }
+  }
+  agora de volta ao teste
+mudamos o titulo. mudamos para get no titulo do teste. porem para testar se a gente tem as perguntas a gente precisa criar algumas perguntas enão antes de fazer a busca a gente vai criar alguma com await prisma.question.createMany({
+  data: [] a gente passa um array e dentro dele a gente cria umas quatro questoes passando o title slug content e author sendo o user.id do user que a gente acabou de criar.
+})
+ await prisma.question.createMany({
+      data: [
+        {
+          title: 'Question 01',
+          content: 'This is the question',
+          slug: 'question-01',
+          authorId: user.id,
+        },
+        {
+          title: 'Question 02',
+          content: 'This is the question',
+          slug: 'question-02',
+          authorId: user.id,
+        },
+        {
+          title: 'Question 03',
+          content: 'This is the question',
+          slug: 'question-03',
+          authorId: user.id,
+        },
+        {
+          title: 'Question 04',
+          content: 'This is the question',
+          slug: 'question-04',
+          authorId: user.id,
+        },
+      ],
+    })
+    nesse caso a gente não precisa autenticar porque nos estamos criando direto no banco de dados e não fazendo a requisição e post é a requisição que pede a autorização.
+  
+  agora nos vamos fazer o nosso const response que vai ser a procura de varias questoes recentes. a gente da um get no /questions passamos o token de autenticação.
+  const response = await request(app.getHttpServer())
+      .get('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+  a gente espera que o statusCode seja 200
+    expect(response.statusCode).toBe(200)
+  vamos tirar a parte de verificação do bancode dados com o findFirst porque a gente ja esta verificando no banco de dados nesse teste.
+  e vamos ter um espect para ver se o corpo da resposta seja igual a um objeto constendo quesions que é um array e dentro desse array a gente faz um expect seja retornado um objectContaining (ai ele ja verifica o primeiro objeto do array) e dentro desse contain a gente coloca titulo question01 vazemos um expect para o segundo, terceiro, quarto. 
+  
+    const response = await request(app.getHttpServer())
+      .get('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      questions: [
+        expect.objectContaining({ title: 'Question 01' }),
+        expect.objectContaining({ title: 'Question 02' }),
+        expect.objectContaining({ title: 'Question 03' }),
+        expect.objectContaining({ title: 'Question 04' }),
+      ],
+    })
+  })
+
+  a pagina completa fica assim:
+  import { AppModule } from '@/app.module'
+import { PrismaService } from '@/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+
+describe('Fetch recent questions -tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions', async () => {
+    const user = await prisma.user.create({
+      data: {
+        name: 'Jhon Doe',
+        email: 'jhon@doe.com',
+        password: await hash('123456', 8),
+      },
+    })
+
+    const accessToken = jwt.sign({ sub: user.id })
+
+    await prisma.question.createMany({
+      data: [
+        {
+          title: 'Question 01',
+          content: 'This is the question',
+          slug: 'question-01',
+          authorId: user.id,
+        },
+        {
+          title: 'Question 02',
+          content: 'This is the question',
+          slug: 'question-02',
+          authorId: user.id,
+        },
+        {
+          title: 'Question 03',
+          content: 'This is the question',
+          slug: 'question-03',
+          authorId: user.id,
+        },
+        {
+          title: 'Question 04',
+          content: 'This is the question',
+          slug: 'question-04',
+          authorId: user.id,
+        },
+      ],
+    })
+
+    const response = await request(app.getHttpServer())
+      .get('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      questions: [
+        expect.objectContaining({ title: 'Question 01' }),
+        expect.objectContaining({ title: 'Question 02' }),
+        expect.objectContaining({ title: 'Question 03' }),
+        expect.objectContaining({ title: 'Question 04' }),
+      ],
+    })
+  })
+})
+
+com iso nos finalizamos esses testes end2end.
 
 
 
