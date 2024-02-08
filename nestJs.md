@@ -2885,6 +2885,10 @@ apartir de agoa a gente vai dividir cada uma dessas camadas para que seja um pro
 # copiando a camada de dominio para esse projeto
 no outro projeto a gente criou a camada de dominio. 
 vamos abir o outro projeto. e vamos pegar a pasta core e a pasta domain e copiar ela dentro do src desse nosso projeto atual.
+pegamos tambem no projeto antigo dentro da pasta teste as pastas utils factory e repository e colamos em nossa pasta teste.
+ainda vamos eventualmente instalar umas dependencias como o faker js e o dayjs que a gente estava usando no outro projeto mas ainda não instalou nesse.
+mas isso a gente vai fazer mais tarde.
+
 
 
 
