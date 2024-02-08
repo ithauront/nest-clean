@@ -2867,6 +2867,25 @@ describe('Fetch recent questions -tests (e2e)', () => {
 
 com iso nos finalizamos esses testes end2end.
 
+# arquitetura de camadas
+no nosso caso tudo vai nascer de uma requisição http
+assim que o usuario faz uma requisição http ela vai bater nos nossos controllers
+o controler vai enviar essa requisição para um useCase
+o caso de uso vai enviar uma ou mais chamadas(intereções) com entidades de nossa aplicação
+porem esse fluxo não é bem uma linha reta. nos nossos casos de uso é comum tambem fazermos operações no nosso banco de dados. ou seja a gete chegou com a nossa requisição no caso de uso. mas as vezes desse caso de uso a gente volta para uma camada mais externa para buscar dados do repositorio que por sua vez vai bater no nosso ainda mais externo banco de dados. o prisma esta na camada mais externa de nossa aplicação.
+então depois de todo esse fluxo de busca de informações a gene tem uma volta para devolver uma resposta para o usuario.
+o controller vai chamar um uttro elemento que fica em sua mesma camada que é um presenter.
+o presenter é uma parte de nossa aplcaição que vai adaptar a forma que a resposta é enviada para o usuario.
+e ai o presenter devolve para o usuario a resposta do controler
+para deixar mais claro o presenter.
+imagina que vamos listar  usuarios
+a gente envia na requisição alguns dados como o get e de onde vamos pegar esse get se queremos um ou varios usuarios etc que vao passar pelo controler o controller faz iterações com as entidades e repositorios, criptografias e ets. depois detudo isso que ele fez ele vai ter um output das operações que ele realizou.
+ai ele tem a resposta com a lista de usuarios. como nos vamos apresentar isso para o usuario. a gente não pode mostrar como eles estão salvos, porque ai entregaria tudo para o usuario como a senha, o id etc. então a gente vai selecionar o qe a gente mostra para o usuario e entregar para ele apenas o que precisamos entregar.
+apartir de agoa a gente vai dividir cada uma dessas camadas para que seja um processo mais visivel de onde esta cada coisa.
+# copiando a camada de dominio para esse projeto
+no outro projeto a gente criou a camada de dominio. 
+vamos abir o outro projeto. e vamos pegar a pasta core e a pasta domain e copiar ela dentro do src desse nosso projeto atual.
+
 
 
 
