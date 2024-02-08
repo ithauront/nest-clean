@@ -10,8 +10,7 @@ interface DeleteQuestionUseCaseRequest {
 
 type DeleteQuestionUseCaseResponse = Either<
   ResourceNotFoundError | UnauthorizedError,
-  // eslint-disable-next-line @typescript-eslint/ban-types
-  {}
+  null
 >
 
 export class DeleteQuestionUseCase {
@@ -32,6 +31,6 @@ export class DeleteQuestionUseCase {
     }
     await this.questionsRepository.delete(question)
 
-    return right({})
+    return right(null)
   }
 }

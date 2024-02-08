@@ -7,8 +7,11 @@ interface DeleteCommentOnAnswerUseCaseRequest {
   authorId: string
   commentOnAnswerId: string
 }
-// eslint-disable-next-line
-type DeleteCommentOnAnswerUseCaseResponse = Either<ResourceNotFoundError | UnauthorizedError, {}>
+
+type DeleteCommentOnAnswerUseCaseResponse = Either<
+  ResourceNotFoundError | UnauthorizedError,
+  null
+>
 
 export class DeleteCommentOnAnswerUseCase {
   constructor(private answerCommentsRepository: AnswerCommentsRepository) {}
@@ -27,6 +30,6 @@ export class DeleteCommentOnAnswerUseCase {
     }
     await this.answerCommentsRepository.delete(answerComment)
 
-    return right({})
+    return right(null)
   }
 }

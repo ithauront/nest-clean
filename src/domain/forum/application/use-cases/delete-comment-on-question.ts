@@ -10,8 +10,7 @@ interface DeleteCommentOnQuestionUseCaseRequest {
 
 type DeleteCommentOnQuestionUseCaseResponse = Either<
   ResourceNotFoundError | UnauthorizedError,
-  // eslint-disable-next-line @typescript-eslint/ban-types
-  {}
+  null
 >
 
 export class DeleteCommentOnQuestionUseCase {
@@ -31,6 +30,6 @@ export class DeleteCommentOnQuestionUseCase {
     }
     await this.questionCommentsRepository.delete(questionComment)
 
-    return right({})
+    return right(null)
   }
 }

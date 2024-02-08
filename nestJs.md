@@ -2888,6 +2888,79 @@ vamos abir o outro projeto. e vamos pegar a pasta core e a pasta domain e copiar
 pegamos tambem no projeto antigo dentro da pasta teste as pastas utils factory e repository e colamos em nossa pasta teste.
 ainda vamos eventualmente instalar umas dependencias como o faker js e o dayjs que a gente estava usando no outro projeto mas ainda não instalou nesse.
 mas isso a gente vai fazer mais tarde.
+para garantir que nada esta dando erro a gente vai rodar a build mas de uma forma noemit com o comando
+npx tsc --noEmit
+esse comando faz um typechekin ou seja ele ve se tem algum erro de typescript mas sem fazer a compilação.
+
+ao rodar isso encontramos erros no dayjs e o fakerjs que ele não encontra
+vamosentão instalar o faker
+npm i -D @faker-js/faker
+e vamos instalar tambem a dayjs como uma dependencia normal porque ela tembam vai ser usada em produção.
+npm i dayjs
+agora rodamos de novo o tsc
+para ver se ainda tem problema
+ele não deu erro. 
+agora vamos rodar o lint fix olhando o script no npm run lint --fix
+e vamos ver os erros que ele nõa consegue resolver sowinho.
+um dos erros que esta acontecendo é não usar um objeto em branco como um type. no typescript ele não entende que isso é um retorno vazio. então no caso do delete question a gente vai trocar isso por null
+e no return tambem. o nosso delete question fica assim:
+import { Either, left, right } from '@/core/either'
+import { QuestionsRepository } from '../repositories/questions-repository'
+import { ResourceNotFoundError } from '../../../../core/errors/errors/resource-not-found-error'
+import { UnauthorizedError } from '../../../../core/errors/errors/unauthorized'
+
+interface DeleteQuestionUseCaseRequest {
+  questionId: string
+  authorId: string
+}
+
+type DeleteQuestionUseCaseResponse = Either<
+  ResourceNotFoundError | UnauthorizedError,
+  null
+>
+
+export class DeleteQuestionUseCase {
+  constructor(private questionsRepository: QuestionsRepository) {}
+
+  async execute({
+    questionId,
+    authorId,
+  }: DeleteQuestionUseCaseRequest): Promise<DeleteQuestionUseCaseResponse> {
+    const question = await this.questionsRepository.findById(questionId)
+
+    if (!question) {
+      return left(new ResourceNotFoundError())
+    }
+
+    if (authorId !== question.authorId.toString()) {
+      return left(new UnauthorizedError())
+    }
+    await this.questionsRepository.delete(question)
+
+    return right(null)
+  }
+}
+
+é importante olar porque a gente tinha desabilitado essa linha no eslint.
+vamos olhar arquivos um por um e modificar isso. basicamente em todos os delete.
+tem uns warning s pq estamos usando any. a gente pode mudar para unknown ou deixar o any mesmo.
+aindatemos o erro de do not use new for side effects.
+isso acontece pq a gente esta usando o new para disparar o constructopara ouvir um evento e não exatambemte para pegar as propriedades dele. isso não é um erro muito grave então vamos mudar isso na regras do lint.
+{
+    "extends": "@rocketseat/eslint-config/node",
+    "rules": {
+        "no-useless-constructor":"off",
+        "no-new": "off"
+    }
+}
+
+com isso so sobra os erros de unused coisas que foram declaradas o que não é erro e sim warning e não é muito grave.
+agora a gente roda o lint de novo para ver se esuaecemos  algo. se mostrar apenas o warn de declarado mas não usado esta ok e ai a gente passa a testar de novo com o npx tsc -noEmit para ver se não quebramos algo. e se funcionar a gente roda os testes unitarios
+npm run test
+e ver se a gente não quebrou algo. se tudo passar significa que tudo funcionou bem.
+funciounou.
+
+
 
 
 
