@@ -2960,6 +2960,110 @@ npm run test
 e ver se a gente não quebrou algo. se tudo passar significa que tudo funcionou bem.
 funciounou.
 
+## criando a camada de infraestrutura
+a camada de infraestrutura vai ficar responsavel pelas duas camadas mas externas da aplicação. os controllers repostitorios e etc.
+a gentge vai em src fazer uma pasta chamada infra e vamos mover para essa pasta tudo que é expecifico dessa camada ou seja especifico do framework (nest) ou banco de dados ou tudo que é da camada mais externa coisas que a gente não pode testar unitariamente
+vamos mover então para a pasta infra :
+app.module
+env
+main
+a pasta prisma
+a pasta auth
+a pasta controllers
+e  pasta pipe
+
+agora que esta tudo la nos vamos separar ainda um pouco melhor.
+o pipe por exemplo é usado para fazer validação nos controllers então eles são coisas que andam juntas porem o prisma e os controllers ja não tem tanta relação
+ou seja uma coisa é de banco de dados e outra é de http. então vamos criar uma pasta dentro de infra chamada http e tudo que for http a gente vai colocar nela.
+ou seja. http tem controllers e pipes
+a parte de autenticação tambem no nosso caso esta bem relacionada a http. porem a gente pode talvez usar autenticação mais na frente para outras coisas que não sejam relacionadas a http. então por isso porenquanto a gente vai deixar ela fora do http.
+importante. a forma que a gente organiza as pastas na nossa aplicação não determina realmente se a gente esta usando uma clean architecture ou não. essa é so a forma que a gente se organiza melhor junto com o noso time.
+agora que esta arrumado vamos verificar se tem alguma importação que quebrou.
+em tdos os testes dos controllers temos que atualizar a importação do app.mpduels
+no app module a gente atualiza a importaçéao do auth.module
+e na pasta auth no jwt strategy e no authmodules a gente atualiza o env.
+
+com isso a gente precisa atualizar um script no package json
+o nest start hoje usa o main . e se a gente for no nest-cli.json ele esta assim:
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+
+a gente pode mudar nesse arquivo para ele entender o novo endereço do main
+depois de sourceRoot a gente abre um entryfile e a gente coloca ele como sendo infra/main
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "entryFile": "infra/main",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+
+
+se a gente rodar o banco de dados e dar npm run start:dev agora vamos ver se ele roda corretamente.
+o ideal é a gente tambem rodar nossos testes end2end para garantir que esta fucnionando.
+se tudo funcionar a gente vai aproveitar para separar os nossos modulos. porque hoj esta tudo no app.module.ts
+então vamos dentro da pasta http e vamos criar o http.module.ts
+nele vamos exportar uma classe HttpModule
+colocamos o decorator de module nele e tudo que for relacionado ao http a gente vai trazer para ele. ele fica assim antes de trazermos as coisas para dentro dele
+import { Module } from '@nestjs/common'
+
+@Module({})
+export class HttpModule {}
+
+agora vamos la no app.module.
+vamos pegar por exemplo o arrayde controllers que esta la no app.module e fazemos todas as importaçõs
+e agora dentro do app.module a gente importa o httpModule
+porem a gente precisa no http modume tambem declarar o prisma porque se não os controllers não vao achar ele porque ele não é global então apos delarar os controllers a gente passa o provider e dentro dele a gente passa o PrismaService
+e agora podemos tirar o prismaService do app.module uma vez que ele ja esta onde ele vai ser usado que é o http mdule.
+asim fica o httpmodule:
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { PrismaService } from '../prisma/prisma.service'
+
+@Module({
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+  ],
+  providers: [PrismaService],
+})
+export class HttpModule {}
+
+e assim fica o app.MODULE:
+import { Module } from '@nestjs/common'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env'
+import { AuthModule } from './auth/auth.module'
+import { HttpModule } from './http/http.module'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    AuthModule,
+    HttpModule,
+  ],
+})
+export class AppModule {}
+
+rodamos todos os nossos testes para verificar se nada quebrou
+
+
 
 
 
