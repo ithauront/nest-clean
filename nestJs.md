@@ -3063,6 +3063,273 @@ export class AppModule {}
 
 rodamos todos os nossos testes para verificar se nada quebrou
 
+# imolementando repsitorios do primsa
+pasta domain dentro de aplication a gente tem os repositorios.
+esses são repositorios de interface(contratos) que falam os metodos que temos e quais parametros e respostas espearadas para esses repositorios. e a unica implementação que temos para esses repositorios até então soa os inmemory repositorio de teste que temos. mas agora que queremos fazer a app funcionar de ponta a ponta vamos precisar mplementar esses repositorios na parte do prisma;
+então dentro da pasta de prisma a gente vai criar uma pasta chamada repositories e vamos implementar cada um desses repositorios.
+porem antes disso vamos la em infra e vams criar uma pasta chamada database
+essa parsta é para termos nossas coisas de banco de dados alinhada, porque por enquanto estamos usando primsa; mas na frente a gente pode talvez mudar isso.
+vamos mover o primma para dentro de database e tudo que é de database a gente vai colocar na pasta database. vamos então criar um database.module.ts
+fica assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+
+@Module({
+  providers: [PrismaService],
+})
+export class DatabaseModule {}
+
+agora no httpModule a gente não precisa mais passar diretamente o provider PrismaService. a gente vai passar o databaseModule
+a gente pode importar o databaSeModule.
+porem se a gente tentar rodar a app so imprtando o databaseModule vai dar erro porque dentro do database mesmo tendo declarado o prisma service a gente esta dizendo que o prisma service precisa estar disponivvel dentro deste modulo e não necessariamente nos modulos que importam ele.
+para que ele fique disponivel para quem importar esse modulo a gente tem que usar a propriedade exports então fica assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class DatabaseModule {}
+
+e o http module assim:
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+
+@Module({
+  imports: [DatabaseModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+  ],
+})
+export class HttpModule {}
+
+agora vamos para dentro de prisma na pasta repositories
+vamos criar os:
+ prisma-questions-repository.ts
+ prisma-answers-repository.ts
+ prisma-question-comments-repostory.ts
+ prisma-question-attachments-repository.ts
+ prisma-answer-comments-repository.ts
+ prisma-answer-attachments-repository.ts
+
+e o que a gente vai fazer com eles. assi como nos inmemory a gente vai simplismente criar classes que implementam o repositorio da camada de dominio
+lembrando que é importante que camadas mais externas podem depender de camadas internas. o contrario que não pode acontecer. e nesse caso a gente ta de uma camada de fora importando uma de dentro.
+e agora que a gente faz a implementação a gente tem que implementar os metodos. e por enquanto vamos deixar o throw new error nos metodos
+a umtima coisa que temos que lembrar é que o repositorio do prisma vai ser usado para a parte de injeção de dependencia então temos que colocar o decorato injetacble
+tuso que vai ser inviado para o construtor de uma outra classe como é o caso aqui nos precisamos usar o injectable
+então vamos fazer isso em todos os repositorios. cada arquivo vai ficar assim: repare o nome das classes para colocar nos arquivos certos.
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerAttachment } from '@/domain/forum/enterprise/entities/answer-attachment'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class PrismaAnswerAttachmentRepository implements AnswerAttachmentsRepository {
+  findManyByAnswerId(answerId: string): Promise<AnswerAttachment[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  deleteManyByAnswerId(answerId: string): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { QuestionComment } from '@/domain/forum/enterprise/entities/question-comment'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class PrismaQuestionCommentsRepository
+  implements QuestionCommentsRepository
+{
+  findById(id: string): Promise<QuestionComment | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  findManyByQuestionId(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<QuestionComment[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  create(questionComment: QuestionComment): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  delete(questionComment: QuestionComment): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class PrismaAnswerCommentsRepository
+  implements AnswerCommentsRepository
+{
+  findById(id: string): Promise<AnswerComment | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  findManyByAnswerId(
+    answerId: string,
+    params: PaginationParams,
+  ): Promise<AnswerComment[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  create(answerComment: AnswerComment): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  delete(answerComment: AnswerComment): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { Answer } from '@/domain/forum/enterprise/entities/answer'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class PrismaAnswersRepository implements AnswersRepository {
+  findById(id: string): Promise<Answer | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  findManyByQuestionId(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<Answer[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  create(answer: Answer): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  delete(answer: Answer): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  save(answer: Answer): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class PrismaQuestionAttachmentsRepository
+  implements QuestionAttachmentsRepository
+{
+  findManyByQuestionId(questionId: string): Promise<QuestionAttachment[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  deleteManyByQuestionId(questionId: string): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  findById(id: string): Promise<Questions | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  findBySlug(slug: string): Promise<Questions | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  findManyRecent(params: PaginationParams): Promise<Questions[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  create(question: Questions): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  delete(question: Questions): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  save(question: Questions): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+
+assim se não me engano foram todos
+ainda esta faltando os repositorios da parte de notificação. porenquanto a gente não vai fazer.
+lembrando que como todos esses repositorios vão ser injetados dentro do nosso databaseModules a gente vai passar no provider cada um desses repostoriso que criamos.
+@Module({
+  providers: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    PrismaQuestionsRepository,
+  ],
+
+  porem se a gente deixar esses repositorios apenas na parte de providers eles vção estar visiveis apenas no databasmodules. para que eles funcionem em quem importar o databasemdoules a gente precisa colocar eles tambem no export da mesma forma que fizemos com o prismaService.
+  o databaseModule fica assim:
+  import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+
+@Module({
+  providers: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    PrismaQuestionsRepository,
+  ],
+  exports: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    PrismaQuestionsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+
 
 
 
