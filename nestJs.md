@@ -3329,6 +3329,120 @@ import { PrismaQuestionsRepository } from './repositories/prisma-questions-repos
 })
 export class DatabaseModule {}
 
+vamos agora começar a implemenntar os metodos vamos começar com o prisma questions repository e metodo de findById
+onde a gente vaio buscar uma question de dentro do banco de dados a travez de seu id e retornar ela. então a gente vai fazer uma cont pra question. aionar o prisma então vamos ter que colocar esse contructor em todos os repositorios
+constructor(private prisma: PrismaService) {}
+e agora a gente pode usar o prisma questions.findUnique e pegar pelo id. porem se a gente retornar essa question não vai funcionar. porque a question prometida esta no formato da question da entidade que não necessariamente é o formato do banco de dados. então uma coisa que é muito comum acontecer é a gente ter a mesma entidade representada de formas diferentes em diferentes camadas.
+nesses casos é muito comum a gente fazer uso de algo quea gente chama de forma generica de mappers
+
+## mappers
+vamos dentro da pstar database/prisma criar uma nova pasta chamada mappers.
+os mappers são classes responsaveis por converter uma entidade no formato de uma camada para o formato de uma outra camada.
+nessa pasta vamos criar o prisma-question-mapper.ts
+e ele vai ser uma classe e dentro dela vai ter um metodo static porque não vamos precisar instanciar essa classe. esse metodo vai se chamar toDomain() em outras palavras a gente vai pegar uma question do prisma e transformar ela em uma question do domain. a gente vai receber a question do prisma e chamar ela de raw e vamos tipar ela pegando o a Question do prisma/client  e renomear para PrismaQuestio,n so para a gente não confundir ela.
+e agora a gente quer devolver uma question do domain então  gente promete uma Question
+import { Questions } from '@/domain/forum/enterprise/entities/questions';
+import { Question as PrismaQuestion } from '@prisma/client'
+
+export class PrismaQuestionMapper {
+  static toDomain(raw: PrismaQuestion): Questions {}
+}
+
+
+agora dentro desse metodo q gente so vai trocar um pelo outro então vamos fazer um return Questions.create ou seja vamos criar uma referencia para uma question ja existente. a gente pode fazer isso passando o nosso id pelas regras do nosso dominion. então no nosso segundo parametrp do create vamos logo passar o id raw.id
+ return Questions.create({}, raw.id)
+ porem ter um problema na nossa entity question ela fala que o id tem que ser do tipo uniqueEntityId
+ e o nosso id do banco de dados é um string então q gente tem que tirar ele. fazer um newUniqueEntityId(raw.id)
+   return Questions.create({}, new UniqueEntityId(raw.id))
+   agora dentro do objeto nos vamos preencher cada um dos camos que a gente precisa preencher.
+   no caso do bestAnswer a gente não criou ele no nosso schema da tabela questions do prisma então vamos ter que fazer depois. por enaqunto vamos colocar como undefined.
+   no caso do slug ele é do tipo Slug então a gente vai ter que chamar esse Slug dar um create ou um createFrom text que são diferentes o create from text vai receber um texto e converter em um slug o create é para quando a gente quer criar um slug a parter de um slug ja existente. que é o nosso caso agora. entéao vamos dar slug.create(raw.slug)
+   acho que tem um erro aqui que a gente não salvou o updatedAt como opcional no banco de dados do prisma. eu vou fazer como se ele fosse opcional e depois quando formos alterar o bestanswer vou tambem alterar isso no nosso schema do prisma/.
+   então vamos la na entity questio e colocamos o camo como undefined de opcional mas dizemos que ele pode tambem ser nulo.
+   export interface QuestionProps {
+  authorId: UniqueEntityId
+  bestAnswerId?: UniqueEntityId
+  title: string
+  content: string
+  slug: Slug
+  createdAt: Date
+  updatedAt?: Date | null
+  attachment: QuestionAttachmentList
+}
+
+com isso a gente tem tres pssiveis valores para o updatedAt. ele pode ser uma data caso seja preenchido. ele pode ser undefined caso a questão esteja sendo criada e passado como não existente ainda. ou ele pode ser vazio caso a questão ja exista.
+o nosso prisma question mapper fica asism:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Slug } from '@/domain/forum/enterprise/entities/value-objects/slug'
+import { Question as PrismaQuestion } from '@prisma/client'
+
+export class PrismaQuestionMapper {
+  static toDomain(raw: PrismaQuestion): Questions {
+    return Questions.create(
+      {
+        title: raw.title,
+        content: raw.content,
+        authorId: new UniqueEntityId(raw.authorId),
+        bestAnswerId: undefined,
+        slug: Slug.create(raw.slug),
+        createdAt: raw.createdAt,
+        updatedAt: raw.updatedAt,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+}
+
+agora a gente pode ir no nosso prisma-question-repository e retornar usando o mapper assim lembrando de colocar o async await e tambem de colocar que se a questão não existir é para retornar null. o repositorio por enquanto fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  findBySlug(slug: string): Promise<Questions | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  findManyRecent(params: PaginationParams): Promise<Questions[]> {
+    throw new Error('Method not implemented.')
+  }
+
+  create(question: Questions): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  delete(question: Questions): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  save(question: Questions): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+e assim aprendemos sobre mappers.
+
+
+temos que lembrar de colocar depois o opcional natabela do prisma para o updatedAt.
 
 
 
