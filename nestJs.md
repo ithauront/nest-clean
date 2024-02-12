@@ -3441,12 +3441,204 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
 
 e assim aprendemos sobre mappers.
 
+## criando schema do prisma
+
 
 temos que lembrar de colocar depois o opcional natabela do prisma para o updatedAt.
 
 
+vamos na pasta root/prisma e acessamos o arquivo schema.prisma
+colocamos como opcional o updateAt no questiont
+model Question {
+  id        String   @id @default(uuid())
+  title     String
+  slug      String   @unique
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+
+  tambem no users a gente adiciona um role e para isso a gente vai criar fora da tabela um enum para dizer se é professor ou aluno
+  enum UserRole
+   enum UserRole {
+  STUDENT
+  INSTRUCTOR
+}
+
+ai no role a gente fala que o tipo é UserRole e o default dele é student
+model User {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  password  String
+  role      UserRole   @default(STUDENT)
+  questions Question[]
+
+  @@map("users")
+}
 
 
+agora a gente vai fazer a tablea de answer para poder criar o campo best answerId no questions
+fica assim:
+model Answer {
+  id        String    @id @default(uuid()) 
+  content   String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  authorId  String    @map("author_id")
+
+  author User @relation(fields: [authorId], references: [id])
+
+  @@map("answers")
+}
+
+e ao salvar no user deve aparecer o relacionamento com o answer
+agente so muda o nome de ANswer para answer assim:
+answers    Answer[]
+
+agora vamos no question e criamos um relacionamento bestAnswer passano para ele o answer? com a interrogação para mostrar que é opcional
+  bestAnswer Answer? se a gente salvar isso ele cria todos esses campos para nos:
+  bestAnswer Answer? @relation(fields: [answerId], references: [id])
+  answerId   String?
+  e tambem o relacionamento na tabela de answer
+porem a ge,nte troca o field de answerId para bestAnswerId
+e usamos o map para best_answer_id
+  author     User    @relation(fields: [authorId], references: [id])
+  bestAnswer Answer? @relation(fields: [bestAnswerId], references: [id])
+  bestAnswerId String? @map("best_answer_id")
+
+  e agora a gente coloca esse  bestAnswerId String? @map("best_answer_id") para cima junto com os outros acmpos para ficar separado dos relacionamentos
+  FICA ASSIM
+  
+model Question {
+  id           String    @id @default(uuid())
+  title        String
+  slug         String    @unique
+  content      String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  authorId     String    @map("author_id")
+  bestAnswerId String?   @map("best_answer_id")
+
+  author     User    @relation(fields: [authorId], references: [id])
+  bestAnswer Answer? @relation(fields: [bestAnswerId], references: [id])
+
+  @@map("questions")
+}
+
+e no answer que criou o relacionamento automatico a gente vai trocar o nome para bestQuestionOn e ele vai ser opcional
+  bestAnswerOn Question?
+
+  porem ai ele vai dar um erro no nosso bestAnswer que esta na tabela question
+  esse erro é porque ele pede para o bestAnswerId ser unique isso porque o unique adiciona um indice no bestAnserId e tambem é uma forma do prisma garantir que uma answer so pode ser a melhor resposta de uma unica question.
+  ta faltando tambum uma outra coisa. uma question pode ter varias answer. então vamos criar esse relacionamento:
+   answers Answer[]
+   e isso vai criar um erro no bestAnswer porque temos dois relacionamentos com a mesma tabela o prisma se perde um pouco então temos que dar nomes para os relacionamentos então no bestAnswer dentro de relation a gente coloca logo no inicio "" e damos um nome para o relaiconamento.
+   e la na tabela de answer onde tem o bestAnswer on a gente tambem tem que colocar o relation e dar o nome. agora se salvar ele não se perde mais e ele cria o restante sowinho.
+   a gente so vai jogar o questionId de la do answer para a parte de campos e não de relações. e a gente tira ele de opcional e faz um mapa para escrever question_id e tambem tiramos do ralacional ele sendo opcional e colocamops com minusuculo.
+   o best answer é opcional mas o question não. toda a resposta tem que estar atrelada a uma pergunta.
+   por enquto a pagina fica assim:
+   // This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+}
+
+model User {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  password  String
+  role      UserRole   @default(STUDENT)
+  questions Question[]
+  answers   Answer[]
+
+  @@map("users")
+}
+
+model Question {
+  id           String    @id @default(uuid())
+  title        String
+  slug         String    @unique
+  content      String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  authorId     String    @map("author_id")
+  bestAnswerId String?   @unique @map("best_answer_id")
+
+  author     User    @relation(fields: [authorId], references: [id])
+  bestAnswer Answer? @relation("bestAnswer", fields: [bestAnswerId], references: [id])
+
+  answers Answer[]
+
+  @@map("questions")
+}
+
+model Answer {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String    @map("question_id")
+
+  author       User      @relation(fields: [authorId], references: [id])
+  bestAnswerOn Question? @relation("bestAnswer")
+  question     Question  @relation(fields: [questionId], references: [id])
+
+  @@map("answers")
+}
+
+e por enauqnto é so. mais tarde vamos fazer a parte de comentarios e anexos.
+
+agora que as tabelas estão feitar a gente vai rodar o migration lembrar de colocar o banco de dados pra rodar
+npm prisma migrate dev
+e o nome da migration vai ser create answers and users role
+
+agora ele ja rodou as migrations no meu banco de dados. e se eu voltar la no nosso mappers a gente pode dar algo no bestAnswer a gente antes tem que dar um restart no vs para ele ler as novas alterações do prisma. é so ir la na barra re pesquisa e escrever restar e eescolher o debug restar. ai a gente pode dar o raw.bestAnswerId
+porem ai ainda vai ter um erro.
+igual do updatedAt porque ele é opcional ou um unique entiti id e ai a gente tem que ir no entity dele e dizer que ele tambem pode ser nulo.
+export interface QuestionProps {
+  authorId: UniqueEntityId
+  bestAnswerId?: UniqueEntityId | null
+  title: string
+  content: string
+  slug: Slug
+  createdAt: Date
+  updatedAt?: Date | null
+  attachment: QuestionAttachmentList
+}
+
+so que ai vai dar um erro no retun do bestAnswerId dentro da entity question
+e para resolver isso a gente tem que ir no set bestanswer e dizer que ele tambem pode ser nulo
+
+  set bestAnswerId(bestAnswerId: UniqueEntityId | undefined | null) {
+    if (bestAnswerId && bestAnswerId !== this.props.bestAnswerId) {
+      this.addDomainEvent(new QuestionBestAnswerChosenEvent(this, bestAnswerId))
+    }
+    this.props.bestAnswerId = bestAnswerId
+    this.touch()
+  }
+
+  ai para de dar erro e a pagina de questions ja esta boa.
+
+  agora voltamos para o map e fazemos a logica para se o bestAnswerId existir ele vai ser um new uniqueEntityId(raw.bestAnswer) se não elev vai ser nulo
+        bestAnswerId: raw.bestAnswerId
+          ? new UniqueEntityId(raw.bestAnswerId)
+          : null,
+
+  agora esta tudo certo e a gente pode continuar a implementar os repositorios.
+  
 
 
 
