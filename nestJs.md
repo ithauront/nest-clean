@@ -3638,7 +3638,184 @@ e para resolver isso a gente tem que ir no set bestanswer e dizer que ele tambem
           : null,
 
   agora esta tudo certo e a gente pode continuar a implementar os repositorios.
+
+  vamos fazer o slug que é muito parecido com o outro so mudamos de id para slug
+    async findBySlug(slug: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
   
+  vamos agora implementar o findManyRecent que ee quer listar as 20 recententes ordenandas pelo createdAt
+  a gente transforma em async
+  nos vamos pegar a page dedentro do paramst({page}: PaginationParams):
+  e usamos o question para ser o findMany
+  ai dentro do findMany a gente começa usando o orderBy a gente joga o createdAt : 'desc" para pegar de ordem decrescente com os mais recentes primeiro.
+  e para a paginação a gente usa o take: 20 para pegar 20 e quantos a gente vai pular ai a gente faz o page -1 * 20
+     const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+  
+
+  agora para retonar como sendo varias questions a gente pode fazer com a manha de mapear a questions e fica assim
+return questions.map((question) => {
+      return PrismaQuestionMapper.toDomain(question)
+    })
+
+    e a gente pode simplicifar isso passando apenas o toDomain que é uma função e o questions.map precisa de uma função ele funciona tambem fica assim
+    
+    return questions.map(PrismaQuestionMapper.toDomain)
+
+    fica assim o metodo todo
+    
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  agora vamos para o proximo metodo save. a gente criou o mapper para converter uma question do formato do prisma para o formato da entidade a nive de dominio. porem agora a gente precisa do formato contrario. se a gente fizer apenas o create o prisma nao entende alguns campos como o uniqueEntityId e etc.
+  então a gente tem duas altenativas. a gente pode passar o create e passar data e cada campo separadamente e passando os values como question.slug.value.
+  entéao para não fazer isso nos vamos la no mapper e alem do metodo static toDomain a gente vai criar o toPrisma esse metodo vai receber uma question do dominio e precisa devolver uma prismaQuestion
+    static toPrisma(question: Questions): PrismaQuestion {}
+    porem a prismaquestion tem varios campos que não necessariamente são necessarios para criar no banco de dados. então para melhorar isso a gente vai importatr o Prisma e de dentro dele vai ter o QuestionUnchecked 
+    static toPrisma(question: Questions): Prisma.QuestionUncheckedCreateInput {}
+    assim ele muda umas coisas como o id não ser ibrigatorio e outras coisas.
+    e agora a gente da um retorno e vai enchendo os campos para os ids a gente usa o metodo toString pq eles são salvos como uniqueEntityId
+    id: question.id.toString(),
+      authorId: question.authorId.toString(),
+      bestAnswerId: question.bestAnswerId?.toString(),
+    para o slug como ele é um valueObject a gente tem que pegar so o valor para vir uma string
+    fica assim:
+      static toPrisma(question: Questions): Prisma.QuestionUncheckedCreateInput {
+    return {
+      id: question.id.toString(),
+      authorId: question.authorId.toString(),
+      bestAnswerId: question.bestAnswerId?.toString(),
+      title: question.title,
+      content: question.content,
+      slug: question.slug.value,
+      createdAt: question.createdAt,
+      updatedAt: question.updatedAt, 
+    }
+  }
+
+  agora podemos voltar no repositorio e passamos esse metodo do mapper para fazer fica assim:
+   
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.update({
+      where: { id: data.id },
+      data,
+    })
+  }
+
+  o create é parecido so que muda o update pelo create e não precisa do whereId: data.id
+  fica assim
+
+   async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+  }
+
+  e agora o delete
+  a gente faz parecido e ele faz um meodo delete no where id: data.id
+    async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+  }
+
+com isso o repositorio ficou pronto:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+  }
+
+  async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+  }
+
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.update({
+      where: { id: data.id },
+      data,
+    })
+  }
+}
+
+
 
 
 
