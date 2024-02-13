@@ -3815,7 +3815,268 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
   }
 }
 
+antes de continuar implementando outros repositorios vamos testar o fluxo tentando usar o caso de uso do createQeustion la no nosso controller do createQuestion
+atualmente o nosso createQeustion no http esta dependendo diretametne do prisma
+export class CreateQuestionController {
+  constructor(
+    private jwt: JwtService,
+    private prisma: PrismaService,
+  ) {}
 
+  inclusuive podeos tirar esse jwt que não usamos.
+  e tambem atualizar a importação para pegar o database:
+  import { PrismaService } from '@/infra/database/prisma/prisma.service'
+
+  mas então o fluxo certo seria que o controller usasse o caso de uso e esse caso de uso que chamasse o prisma.
+  então se a gente trocar essa dependencia pela dependencia do caso de uso createQeustion com o tipo CreateQuestionUseCase que vamos importarla d caso de uso
+  constructor(private createQuestion: CreateQuestionUseCase) {}
+
+  e agora la dentro a gente pode dispençar o metodo converToSlug
+  e ao inves de chamar o prisma a gente pode vir diretamente chamadno o useCase e passar para ele o attachmentId como um array vazio e o authorId como o userId e o title e content a gente passa tambem fica assim:
+   @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: CreateQuestionBodySchema,
+  ) {
+    const { title, content } = body
+    const userId = user.sub
+
+    await this.createQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: [],
+    })
+  }
+}
+
+com isso a gente ja esta usando o caso de uso da camada de dominio nos nossos controllers
+so que s e a gente tentar usar assim não vai funcionar porque o nest toda classe que for injetada precisa obrigatoriamente o injectable o prisma tinha injectable e o caso de uso não tem por que ele esta na camada de dominio. ele não pode estar atrelado ao sistema nest então nos temos duas alternaticas
+a mais facil porem que fere mais os principios do ddd que é colocar o injecable no caso de uso. isso so pode ser aceitaval porque apesar de ser um decorator e vir de uma camada de fora do dominio ele não vai modificar de forma alguma o codigo que temos na camada de dominio (e provavelmente se a gente não usar o nest não iria quebrar seria apenas uma linha de codigo morta) as vezes pode valer a pena se a vantahem da simplicidade for grande para a inconveniencia de uma sujada peauena na cleanarchitecture. porque a outra solução seria
+criar uma representação desse cao de uso dentro de nossa camada infra tambem teriamos um nest-create-qeustion-useCase e criariamos uma classe que extenderia a createQeustionUseCase do dominio. ela não teria qualquer tipo de implementação
+apenas um contrutor e nele repetir o que temos no caso de uso qyue é o construtor do caso de uso. depois um super para chamar o contrutor da classe pai e mandariamos para ele o nosso repositorio
+e o injectable estaria nessa classe.
+e ai no nosso controller a gente usaria esse nest-create-question-useècase
+por um lado não sujaria o ddd e clean architecture mas por outro criaria toda uma sessão de repetição. ai teriamos que avaliar qual é o melhor caminho
+então seria um tradeOff que vale a pena. a gente não precisa ter medo de as vezes quebrar as regras se isso for nos dar vantagem.
+então vamos no nosso createQuestionUseCase e colocar o injectable. ele fica assim;
+import { Either, right } from '@/core/either'
+import { Questions } from '../../enterprise/entities/questions'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { QuestionsRepository } from '../repositories/questions-repository'
+import { QuestionAttachment } from '../../enterprise/entities/question-attachment'
+import { QuestionAttachmentList } from '../../enterprise/entities/question-attachment-list'
+import { Injectable } from '@nestjs/common'
+
+interface CreateQuestionUseCaseRequest {
+  authorId: string
+  title: string
+  content: string
+  attachmentIds: string[]
+}
+type CreateQuestionUseCaseResponse = Either<
+  null,
+  {
+    question: Questions
+  }
+>
+
+@Injectable()
+export class CreateQuestionUseCase {
+  constructor(private questionsRepository: QuestionsRepository) {}
+
+  async execute({
+    authorId,
+    title,
+    content,
+    attachmentIds,
+  }: CreateQuestionUseCaseRequest): Promise<CreateQuestionUseCaseResponse> {
+    const question = Questions.create({
+      authorId: new UniqueEntityId(authorId),
+      title,
+      content,
+    })
+    const attachment = attachmentIds.map((attachmentId) => {
+      return QuestionAttachment.create({
+        attachmentId: new UniqueEntityId(attachmentId),
+        questionId: question.id,
+      })
+    })
+
+    question.attachment = new QuestionAttachmentList(attachment)
+
+    await this.questionsRepository.create(question)
+
+    return right({ question })
+  }
+}
+
+agora precisamos ir la no nosso http module e colocar o createQeustionUseCase nos providers fica assim:
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+
+@Module({
+  imports: [DatabaseModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+  ],
+  providers: [CreateQuestionUseCase],
+})
+export class HttpModule {}
+
+porem se a gente tentar rodar o rpograma assim tambem vamos ter erro.
+ele vai dizer que o nest não consegue resolver as dependencias de createQuestionUseCase isso porque o createQeustin depende do questionsrepository
+porem o questionsRepository ele é uma interface e não uma classe (diferente das outras injeçoes de dependencia que a gente tinha feito antes) 
+e a interface é epsecifica do typescript ela não existe no js e quando a gente for compilar ela deve ser eliminada e como a injeção acontece quando a aplicação esta sendo executada. no nest a aplicação vai ser sempre executada com javascript e não com typescript
+então a recomenação do nest é que ao invez de a gente usar interfaces a gente use classes abstratas então so vamos trocar o repositorio de interface para classe abstrata e na frente de cada um dos metodos a gente coloca abstract. agora o repoitorio ficou assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { Questions } from '../../enterprise/entities/questions'
+
+export abstract class QuestionsRepository {
+  abstract findById(id: string): Promise<Questions | null>
+  abstract findBySlug(slug: string): Promise<Questions | null>
+  abstract findManyRecent(params: PaginationParams): Promise<Questions[]>
+  abstract create(question: Questions): Promise<void>
+  abstract delete(question: Questions): Promise<void>
+  abstract save(question: Questions): Promise<void>
+}
+
+agora temos que ir no nosso database.module e ao inves de enviar os providers como nos estamos enviando. no lugar do prisma question repository a gente vai botar um objeto e nele a gente coloca provide e passamos o nome da nossa classe abstrata e depois um useclass e  PrismaQuestionsRepository e nos exports precisamos tambem trocar de prismaquestionsReporistory para questionsRepository
+fica assim:
+
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+
+@Module({
+  providers: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    { provide: QuestionsRepository, useClass: PrismaQuestionsRepository },
+  ],
+  exports: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    QuestionsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+
+o que nos estamos falando para ele é toda vez que se soliciatar uma arquivo que esteja com dependencia na questionsRepository use a classe PrismaQuestionRepository
+
+
+e para info o nosso controller de createuqestion depois de todas alterações ficou assim:
+import { Body, Controller, Post, UseGuards } from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { JwtAuthGuard } from '@/infra/auth/jwt-auth.guard'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { z } from 'zod'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(createQuestionBodySchema)
+
+type CreateQuestionBodySchema = z.infer<typeof createQuestionBodySchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(private createQuestion: CreateQuestionUseCase) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: CreateQuestionBodySchema,
+  ) {
+    const { title, content } = body
+    const userId = user.sub
+
+    await this.createQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: [],
+    })
+  }
+}
+
+e tabme temos que colocar o database nessa linha em todos os controllers
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+
+se a gente rodar a aplicação e o database agora e tentar criar uma questão ele deve funcionar e ele vai estar usando o fluxo da clean architecture de uma chamada http sendo pega pelo controler que vai validar os dados que então vai chamar o caso de uso o caso de uso vai fazer uso de algumas entidades e tambem vai chamar o repositorio e esse questionRepository vai ser injetado no lugar dele usando a injeção de dependencia do nest o prismaquestionrepository
+que é quem vai fazer o processo de criar uma question dentro do banco de dados. e para fazeressa criação ele usou o mapper para fazer a converção de uma entidade de dominio para uma entidade de persistencia. depois disso o controller devolveu a resposta no caso 201 created
+esta funcionando porem eu tive que atualizar o authToken no client.http porque estava escrito errado fica assim:
+@baseUrl = http://[::1]:3333
+@AuthToken = {{autenticate.response.body.access_token}}
+
+# @name create_account
+POST {{baseUrl}}/accounts
+Content-Type: application/json
+
+{
+    "name": "Iuri Reis",
+    "email": "iuri@rei7.com",
+    "password": "123456"
+}
+
+###
+
+# @name autenticate
+POST {{baseUrl}}/sessions
+Content-Type: application/json
+
+{
+    "email": "iuri@rei7.com",
+    "password": "123456"
+}
+
+###
+
+# @name create-question
+POST {{baseUrl}}/questions
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}
+
+{
+    "title": "Nova Pergunta7",
+    "content": "essa é a nova pergunta"
+}
+
+###
+
+# @name fetch-recent-questions
+GET {{baseUrl}}/questions?page=3
+Content-Type: application/json
+Authorization: Bearer {{AuthToken}}
 
 
 
