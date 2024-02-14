@@ -4079,5 +4079,138 @@ Content-Type: application/json
 Authorization: Bearer {{AuthToken}}
 
 
+# listando perguntas recentes
 
+vamos fazer o mesmo fluxo que fizemos para create question mas para a parte de listagem das perguntas
+vamos no infra/controller fetch recent question a gente vai remover o prisma e vai usar o listRecentQuestionUseCase aqui a gente esta usando fetch mas no domain usamos list. vamos deixar assim.
+e ai a questions vai ser o execute desse useCase passando a paginanque vem dos parametros e não precisamos mais de perPage tiramos o prisma service e fica assim:
+import { Controller, Get, Query, UseGuards } from '@nestjs/common'
+import { JwtAuthGuard } from '@/infra/auth/jwt-auth.guard'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class FetchRecentQuestionsController {
+  constructor(private listRecentQuestions: ListRecentQuestionsUseCase) {}
+
+  @Get()
+  async handle(@Query('page', queryValidationPipe) page: PageParamsTypeSchema) {
+    const questions = await this.listRecentQuestions.execute({
+      page,
+    })
+    return { questions }
+  }
+}
+
+
+agora no caso de uso a gente tem que colocar o injectable
+import { Either, right } from '@/core/either'
+import { Questions } from '../../enterprise/entities/questions'
+import { QuestionsRepository } from '../repositories/questions-repository'
+import { Injectable } from '@nestjs/common'
+
+interface ListRecentQuestionsUseCaseRequest {
+  page: number
+}
+type ListRecentQuestionsUseCaseResponse = Either<
+  null,
+  {
+    questions: Questions[]
+  }
+>
+
+@Injectable()
+export class ListRecentQuestionsUseCase {
+  constructor(private questionsRepository: QuestionsRepository) {}
+
+  async execute({
+    page,
+  }: ListRecentQuestionsUseCaseRequest): Promise<ListRecentQuestionsUseCaseResponse> {
+    const questions = await this.questionsRepository.findManyRecent({ page })
+
+    return right({ questions })
+  }
+}
+
+e no http module a gente passa o listRecenteQuestions no providers assim:
+@Module({
+  imports: [DatabaseModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+  ],
+  providers: [CreateQuestionUseCase, ListRecentQuestionsUseCase],
+})
+
+a gente não precisa criar logo outro reporisotio porque esse metodo esta no repositorio dos questions que a gente ja fez.
+
+porem da forma que o controller ta, ele vai receber um array com varias questions no formato da ntidade da camada de dominio. que não é o formato que a gente quer enviar para o nosso frontEnd. por isso que agora nos vamos usar um novo elemento da cleanArchitecture que é o presenter. para ajustar esses dados de forma que eles sejam melhor apresentados.
+## presenter
+no nosso caso o presenter é especifico da camada http então vamos na pasta http e criamos ma pasta chamada presenter
+e dentro dela um arquivo chamado question-presenter.ts mas se a gente tivesse varias portas de saida de dados ai a gente colocaria o http no titulo para lembrar
+vai ser uma classe chamada Questionpresenter que vai ter um unico metodo statico chaado toHTTP() e ele vai receber uma question que vem do dominio (cuidado para não importar do prisma) e vamos retornar o formato que queremos enviar para o frontEnd.
+então fica assim antes de começarmos a preencher
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+
+export class QuestionPresenter {
+  static toHTTP(question: Questions) {
+    return {}
+  }
+}
+agora vamos colocar as coisas que vamos retornar. o id, title, slug, bestanswerId, createdat e updated at
+   return {
+      id: question.id.toString(),
+      title: question.title,
+      slug: question.slug.value,
+      bestAnswerId: question.bestAnswerId?.toString(),
+      createdAt: question.createdAt,
+      updatedAt: question.updatedAt,
+    }
+    a gente podeira colocar mais campos, mas o ideal é não passar informação desnecessaria. a pagina fica assim:
+    import { Questions } from '@/domain/forum/enterprise/entities/questions'
+
+export class QuestionPresenter {
+  static toHTTP(question: Questions) {
+    return {
+      id: question.id.toString(),
+      title: question.title,
+      slug: question.slug.value,
+      bestAnswerId: question.bestAnswerId?.toString(),
+      createdAt: question.createdAt,
+      updatedAt: question.updatedAt,
+    }
+  }
+}
+
+    agora no fetchRecentQuestion no return  a gente pode passar o questions e a gente pode pasar o map como sendo esse metodo toHttp do presenter
+    porem da erro porque o questions pode ser um left ou right e ai então a gente pega o value dele que pode ser ou o questions[] ou null. a gente vai pegar então na verdade o result e vai fazer uma verificação desse result. então ao inves de ser uma const question a gente vai chamar a const de result e por enquanto apenas verificanco se for left a gente da um erro
+    if (result.isLeft()) {
+      throw new Error()
+    }
+    agoraa gente pega a questions atravez de result.value.questions porque dentro do value a gente tem um questions. assim ele vai ser obrigatoriamente o questions e não mais a possibilidade de ser left e logo nulo;
+    const questions = result.value.questions
+
+     com isso a gente pode fazer o nosso map assim:
+     
+    return { questions: questions.map(QuestionPresenter.toHTTP) }
+  }
+
+agora se a gente fizer uma listagem de perguntas elas vão vir em um formato muito mais agraavel.
+a gente pode adicionar ampos mar por exemplo a gente néao colocou o content porque essa listagem de mostrar 20 geralmente vai mostrar so os titulos não precisamos mostrar o conteudo. então é comum a gente ter um presenter para cada ocasião. vamos ter um que vai mostrar o conteudo e outro que não.
+por enqaunto a gente vai usar so isso. existe uma forma de pedir quais camopos a gente quer usando um graphql(acho que é esse o nome) que ele vai pedir exatambente quais campos queremos. mas em uma estrutura http tradicional a gente não pede.
 
