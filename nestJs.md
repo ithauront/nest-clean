@@ -4214,3 +4214,52 @@ agora se a gente fizer uma listagem de perguntas elas vão vir em um formato mui
 a gente pode adicionar ampos mar por exemplo a gente néao colocou o content porque essa listagem de mostrar 20 geralmente vai mostrar so os titulos não precisamos mostrar o conteudo. então é comum a gente ter um presenter para cada ocasião. vamos ter um que vai mostrar o conteudo e outro que não.
 por enqaunto a gente vai usar so isso. existe uma forma de pedir quais camopos a gente quer usando um graphql(acho que é esse o nome) que ele vai pedir exatambente quais campos queremos. mas em uma estrutura http tradicional a gente não pede.
 
+# gateways de criptografia
+na nossa parte de domain a gente não criou nenhum caso de uso para autenticação ou gestão de usuario. nos temos por exemplo a entidade de students e coisas assim mas não temos os casos de uso para autenticação e cadastros.
+no nosso schema do prisma a gente ja tem uma tabela de user e ela tem role e nome email e password então  vamos la na nossa entidade student e colocamos nas props nome email e password e fazer metodos get para cada um deles. por enquanto não vai ter metodo set para eles.
+fica assim:
+import { Entity } from '@/core/entities/entity'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+
+interface StudentProps {
+  name: string
+  email: string
+  password: string
+}
+
+export class Student extends Entity<StudentProps> {
+  get name() {
+    return this.props.name
+  }
+
+  get email() {
+    return this.props.email
+  }
+
+  get password() {
+    return this.props.password
+  }
+
+  static create(props: StudentProps, id?: UniqueEntityId) {
+    const student = new Student(props, id)
+    return student
+  }
+}
+
+e agora a gente vai la nos reporistories do domain aplication repositories e vamos criar um novo repositorio students-repository.ts
+a gente ja vai fazer ele na pegada de class abstract nesse repositorio por enquanto so vao ter os metodos create e o findByEmail.
+fica assim:
+import { Student } from '../../enterprise/entities/student'
+
+export abstract class QuestionsRepository {
+  abstract findByEmail(email: string): Promise<Student | null>
+  abstract create(student: Student): Promise<void>
+}
+
+e agora que a gente ja esta com o student e o repositorio dele criado a gente ja pode começar a pensar no caso de uso para fazer login na aplicação.
+e se a gente for nos nosssos controllers a gente tem o autenticate e o create account. e eles usam o hash de senha para criar ou para comparar. e alem disso na autenticação a gete tem a criação do token.
+é omportante então a gente entender que a criptografia, é saudavel estar na camada mais externa da aplicação.
+ou seja, no nosso caso de uso, tudo que ele precisar fazer que precise de criptografia ele chame algo que esteja na camada de infra para fazer.
+porem o caso de uso, para se manter limpo ele não chama diretamente as coisas nas camadas infra, por isso por exemplo que usamos os repositorios eles são como gateways
+e nesse caso a gente a gentetambem vai pcisar de um gateway para gerenciar a comunicação entre os casos de uso e as funçoes de criptografia.
+
