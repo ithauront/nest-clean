@@ -4262,4 +4262,39 @@ e se a gente for nos nosssos controllers a gente tem o autenticate e o create ac
 ou seja, no nosso caso de uso, tudo que ele precisar fazer que precise de criptografia ele chame algo que esteja na camada de infra para fazer.
 porem o caso de uso, para se manter limpo ele não chama diretamente as coisas nas camadas infra, por isso por exemplo que usamos os repositorios eles são como gateways
 e nesse caso a gente a gentetambem vai pcisar de um gateway para gerenciar a comunicação entre os casos de uso e as funçoes de criptografia.
+o que nos vamos fazer então é la na camada de domain  aplication a gente cria a pasta cryptography
+e dentro dele a gente vai ter um arquivo chamado encriptor.ts que vai ser o gateway para a parte de geração de tokens jwt. e ele vai ter contratos
+então vamos fazer tambem uma export abstract class e dentro dela um unco metodo chamado encript que vai receber um payload que é o que queremos incluir dentro do token e ele vai ser do tipo Record<string, unknown> ou seja um objeto que a chave é uma string e o valor de cada propriedade é desconhecido e ele vai devolver um token qu é uma string fica assim:
+export abstract class Encrypter {
+  abstract encrypt(payload: Record<string, unknown>): Promise<string>
+}
+
+
+agora a gente vai na mesma pasta criar o arquivo hasher.ts para criar o contrato da parte de hasher.
+e nele vamos ter dois metodos o primeiro vai ser o hash que vai ser o que vai realizar o hasher que vai converter a senha de um plain text para um hash
+  abstract hash(plain: string): Promise<string>
+  e o outro metodo que vai comparar o plain com um hash ja gerado e vai devolver o booleano.
+    abstract compare(plain: string, hash: string): Promise<boolean>
+    fica assim:
+    export abstract class Hasher {
+  abstract hash(plain: string): Promise<string>
+  abstract compare(plain: string, hash: string): Promise<boolean>
+}
+
+
+e agora a gente ja tem os nossos contratos caso qualquer caso de uso precise de criptografia.
+porem se a gente lembrar do solid o i dele vem de interface segregation
+e lembrando que essas classes abstratas que a gente criou deveriam ser interfaces elas so estão sendo classes abstratas por problema no nest não acietar as interfaces na hora do deploy. 
+então a interface segregation diz que nos temos que ter um contrato para cada coisa coisa que algo faz por exemplo uma xerox teria que ter um contrato para copiadora um contrato para imprimir e um contrato para scanear e se ela faz os tres a gente implementa os tres contratos entéao no nosso caso a gente pode separar para ter o hash generator e o hash compare então a gente divide esse arquivo em dois o hash-generator.ts e o hash-comparer.ts eles são assim
+export abstract class HashComparer {
+  abstract compare(plain: string, hash: string): Promise<boolean>
+}
+
+export abstract class HashGenerator {
+  abstract hash(plain: string): Promise<string>
+}
+
+
+isso pode não ajudar mutio na parte do hash, mas em alguns casos pode ajudar então é sempre bom ir pensando nisso de interface segregation.
+agora que isso esta criado nos podemos ir para os uso de caso.
 
