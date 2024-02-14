@@ -4298,3 +4298,265 @@ export abstract class HashGenerator {
 isso pode não ajudar mutio na parte do hash, mas em alguns casos pode ajudar então é sempre bom ir pensando nisso de interface segregation.
 agora que isso esta criado nos podemos ir para os uso de caso.
 
+## caso de uso de autentificação e cadastro
+vamos criar os casos de uso de autenticação e cadastro.
+vamos la nos nossos useCases e vamos criar um arquivo chamado register-student.ts
+a gente faz as interface de request e resposta 
+interface RegisterStudentUseCaseRequest {
+  name: string
+  email: string
+  password: string
+}
+type RegisterStudentUseCaseResponse = Either<
+  null,
+  {
+    student: Student
+  }
+>
+fazemos a export class para ser registerStudent e ela ser injectabele. no constructor da classe a gente usa o studentRepository
+
+atencção caso a classe studentrepository não esteja criada ir la em repository e criar um arquivo chamado student-repository.ts e dentro dele colar isso:
+import { Student } from '../../enterprise/entities/student'
+
+export abstract class StudentsRepository {
+  abstract findByEmail(email: string): Promise<Student | null>
+  abstract create(student: Student): Promise<void>
+}
+
+eu acho que a gente tinha crido mas esquecido de mudar o nome para Student estava como crateQuestion.
+
+porem o constructor precisa tambem do gateway então vamos pegar tamvem como private o hashGenerator
+@Injectable()
+export class RegisterStudentUseCase {
+  constructor(
+    private studentRepository: StudentsRepository,
+    private hashGenerator: HashGenerator,
+  ) {}
+
+  agora dentro do execute a gente pega o name, email e password e vamos fazer o processo para validar a criação. primeiro vamos procurar se não tem um estudante com o mesmo email:
+    const studentwithSameEmail = await this.studentRepository.findByEmail(email)
+    
+    se ele existir vamos disparar um erro. e para não ser um erro generico a gente vai dentro da pasta de useCases e criamos uma pasta errors
+    e criamos nele o student-already-exists-error.ts
+    e nela a gente faz a classe que vai extender a classe de erro do js mas vai tambem implementar  useCaseErrors que a gente criou e ai a gente faz um cosntructor e passa a massagem no super de estudante ja existe fica assim:
+    import { UseCaseErrors } from '@/core/errors/use-case-errors'
+
+export class StudentAlreadyExistsError extends Error implements UseCaseErrors {
+  constructor() {
+    super('student with same e-mail adress already exists')
+  }
+}
+
+porem a gente pode receber parametros nos erros e ai a gente pode colocar para receber um identifier sendo uma string e usar isso na nossa super para que se não for o email e sim outra coisa que ja exista a gente poder passar. e ai vai sermpre funcionar
+
+import { UseCaseErrors } from '@/core/errors/use-case-errors'
+
+export class StudentAlreadyExistsError extends Error implements UseCaseErrors {
+  constructor(identifier: string) {
+    super(`student "${identifier}" already exists`)
+  }
+}
+
+ ai vai ficar por exemplo student iuri@reis.com ja existe
+ ou se a gente trocar pode ficar por exemplo student iuriReisserName ja existe
+ agora no caso de uso a gente precisa falar que ele pode retornar esse erro la no ether fica assim;
+ type RegisterStudentUseCaseResponse = Either<
+  StudentAlreadyExistsError,
+  {
+    student: Student
+  }
+>
+
+e a gente pode fazer a condicional para se o usuario ja existir isando o left
+ if (studentwithSameEmail) {
+      return left(new StudentAlreadyExistsError(email))
+    }
+
+    se passar disso a gente vai gerar o hash da senha usando o hash generator passando o password 
+       const hashedPassword = await this.hashGenerator.hash(password)
+
+       e agora podemos criar e salvar o usuario
+       criar 
+          const student = Student.create({
+      name,
+      email,
+      password: hashedPassword,
+    })
+
+    salvar
+       await this.studentRepository.create(student)
+  eno final a gente retorna rigth devolvendo o tudent Criado
+a pagina fica assim:
+import { Either, right, left } from '@/core/either'
+import { Injectable } from '@nestjs/common'
+import { Student } from '../../enterprise/entities/student'
+import { StudentsRepository } from '../repositories/students-repository'
+import { HashGenerator } from '../cryptography/hash-generator'
+import { StudentAlreadyExistsError } from './errors/student-already-exists-error'
+
+interface RegisterStudentUseCaseRequest {
+  name: string
+  email: string
+  password: string
+}
+type RegisterStudentUseCaseResponse = Either<
+  StudentAlreadyExistsError,
+  {
+    student: Student
+  }
+>
+
+@Injectable()
+export class RegisterStudentUseCase {
+  constructor(
+    private studentRepository: StudentsRepository,
+    private hashGenerator: HashGenerator,
+  ) {}
+
+  async execute({
+    name,
+    email,
+    password,
+  }: RegisterStudentUseCaseRequest): Promise<RegisterStudentUseCaseResponse> {
+    const studentwithSameEmail = await this.studentRepository.findByEmail(email)
+
+    if (studentwithSameEmail) {
+      return left(new StudentAlreadyExistsError(email))
+    }
+
+    const hashedPassword = await this.hashGenerator.hash(password)
+
+    const student = Student.create({
+      name,
+      email,
+      password: hashedPassword,
+    })
+
+    await this.studentRepository.create(student)
+
+    return right({ student })
+  }
+}
+
+vamos copiar isso e criar um arquivo autenticate-student.ts nos useCase e colar isso . mudamos todos os registerStudent por Autenticate Student
+e vamos mudar as coisas. nesse caso não recebemos nome, apenas email e senha
+não vai ter o erro de ja existe então por enquanto a gente deixa nulo ou devolve um access-token
+interface AutenticateStudentUseCaseRequest {
+  email: string
+  password: string
+}
+type AutenticateStudentUseCaseResponse = Either<
+  null,
+  {
+    access_token: string
+  }
+>
+agora no constructor a gente não usa mais o hashGenerator e sim o hashCompare e tambem vamos usar o encripter para gerar o accesstoken
+
+@Injectable()
+export class AutenticateStudentUseCase {
+  constructor(
+    private studentRepository: StudentsRepository,
+    private hashComparer: HashComparer,
+    private encrypter: Encrypter,
+  ) {}
+agora dentro do execute a primeira coisa que a gente faz é buscar o student do mesmo jeitoq a gent estava buscando e ai vamos dar um erro caso a gente não encontre esse estudante
+nos vamos la na pasta useCases de erro denovo para criar um erro caso a gentenão encontre o estudante com o email que foi passado o erro do wrong credentials
+copiamos e colamos o outro error
+n esse caso não vai precisar de identifier
+e ai a gente passa algo no super como Credentials are not valid.
+fica assim:
+import { UseCaseErrors } from '@/core/errors/use-case-errors'
+
+export class WrongCredentialsError extends Error implements UseCaseErrors {
+  constructor() {
+    super(`Credentials are not valid.`)
+  }
+}
+
+com isso salvo a gente pode dizer no either que pode voltar esse erro 
+type AutenticateStudentUseCaseResponse = Either<
+  WrongCredentialsError,
+  {
+    accessToken: string
+  }
+>
+e a autenticação para ver se o studante existe fica assim:
+   const student = await this.studentRepository.findByEmail(email)
+
+    if (!student) {
+      return left(new WrongCredentialsError())
+    }
+
+    agora temos que comparar o hash para ver se ele esta correto
+
+
+
+    const isPasswordValid = await this.hashComparer.compare(
+      password,
+      student.password,
+    )
+
+se der erro a gente repete o erro.
+
+e agora vamos criar o token usando o encripter
+e a gente passa o payload para ele com o studentId usando o toString pa ele é um unique entity id
+
+    const accessToken = await this.encrypter.encrypt({ sub: student.id.toString() })
+
+    e depois de tudo a gente retornar right passando o acessToken
+    a pagina fica assim:
+    import { Either, right, left } from '@/core/either'
+import { Injectable } from '@nestjs/common'
+import { StudentsRepository } from '../repositories/students-repository'
+import { HashComparer } from '../cryptography/hash-comparer'
+import { Encrypter } from '../cryptography/encrypter'
+import { WrongCredentialsError } from './errors/wrong-credentials-error'
+
+interface AutenticateStudentUseCaseRequest {
+  email: string
+  password: string
+}
+type AutenticateStudentUseCaseResponse = Either<
+  WrongCredentialsError,
+  {
+    accessToken: string
+  }
+>
+
+@Injectable()
+export class AutenticateStudentUseCase {
+  constructor(
+    private studentRepository: StudentsRepository,
+    private hashComparer: HashComparer,
+    private encrypter: Encrypter,
+  ) {}
+
+  async execute({
+    email,
+    password,
+  }: AutenticateStudentUseCaseRequest): Promise<AutenticateStudentUseCaseResponse> {
+    const student = await this.studentRepository.findByEmail(email)
+
+    if (!student) {
+      return left(new WrongCredentialsError())
+    }
+
+    const isPasswordValid = await this.hashComparer.compare(
+      password,
+      student.password,
+    )
+
+    if (!isPasswordValid) {
+      return left(new WrongCredentialsError())
+    }
+
+    const accessToken = await this.encrypter.encrypt({
+      sub: student.id.toString(),
+    })
+
+    return right({ accessToken })
+  }
+}
+
+
