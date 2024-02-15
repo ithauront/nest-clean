@@ -4625,4 +4625,295 @@ export class FakeEncrypter implements Encrypter {
 }
 
 a gente não precisa criar um acessToken nem nada disso;, é so para facilitar o testes unitarios então a gente manda um string qualquer e ja ta bom.
+# testes de cadastro e autenticação
+agora que temos os stub vamos fazer os testes de cadastro e autenticação unitarios
+vamos em domain/forum:aplication/usecases e criamos o register-student.spec.ts
+vamos copiar o createquestion.spec.ts nele para ter uma estrutura.
+vamos mudar os nomes para register student
+a gente muda o sut para o registerStudentUseCase
+e esse useCase tem duas dependencias e uma delas não esta criada no inmemoryRepository qye é o student repository então vamos la criar ela
+vamos copiar o qusetion repository deixamos so o metodo create e findById que vamos trocar para findByEmail
+mudamos todos os question por student e ajustamos o metodo email; podemos tirar o constructor. fica assim:
+import { DomainEvents } from '@/core/event/domain-events'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { Student } from '@/domain/forum/enterprise/entities/student'
+
+export class InMemoryStudentsRepository implements StudentsRepository {
+  public items: Student[] = []
+
+  async create(student: Student) {
+    this.items.push(student)
+
+    DomainEvents.dispatchEventsForAggregate(student.id)
+  }
+
+  async findByEmail(email: string) {
+    const student = this.items.find((item) => item.email === email)
+    if (!student) {
+      return null
+    }
+    return student
+  }
+}
+
+agora com isso a gente pode voltar para nsso teste e chamar as nossas referencias na no let
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let fakeHasher: FakeHasher
+let sut: RegisterStudentUseCase
+
+com as importações
+
+e instanciamos as duas dependencias
+
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let fakeHasher: FakeHasher
+let sut: RegisterStudentUseCase
+
+describe('register student test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    fakeHasher = new FakeHasher()
+    sut = new RegisterStudentUseCase(inMemoryStudentsRepository, fakeHasher)
+  })
+
+  agora vamos fazer o nosso teste
+  a gente faz um usuario com coisas ficticias
+   test('if can register student', async () => {
+    const result = await sut.execute({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+    e agora os expects primeiro o sucesso ou eja idRight to be true
+    e a gente espera tambem que o valor do result seja  mesmo que esta salvo la no index 0 do inMemorystudentRepository
+    
+  test('if can register student', async () => {
+    const result = await sut.execute({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value).toEqual({
+      student: inMemoryStudentsRepository.items[0],
+    })
+  })
+  vamos testar tambem se o passoword fia hasheado
+  o teste é igual mas o expect é para ver se o usuario que esta la no repositorio se a senha dele fica com o hashed
+    test('if password becomes hashed', async () => {
+    const result = await sut.execute({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryStudentsRepository.items[0].password).toEqual('123456-hashed')
+  })
+
+  ou a gente pode tambem usar o fakeHasher que fizemos a instancia e passamos a nossa senha 123456 assim ele vai hashear e a gente verifica se o que esta salvo la no repositorio é igual a o que hasheaos
+
+  
+  test('if password becomes hashed', async () => {
+    const result = await sut.execute({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    const hashedPassword = await fakeHasher.hash('123456')
+
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryStudentsRepository.items[0].password).toEqual(hashedPassword)
+  })
+})
+
+o teste todo fica assim:
+import { InMemoryQuestionAttachmentsRepository } from 'test/repositories/in-memory-question-attachment-repository'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { InMemoryQuestionsRepository } from 'test/repositories/in-memory-questions-repository'
+import { RegisterStudentUseCase } from './register-student'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { FakeHasher } from 'test/cryptography/fake-hasher'
+
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let fakeHasher: FakeHasher
+let sut: RegisterStudentUseCase
+
+describe('register student test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    fakeHasher = new FakeHasher()
+    sut = new RegisterStudentUseCase(inMemoryStudentsRepository, fakeHasher)
+  })
+
+  test('if can register student', async () => {
+    const result = await sut.execute({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value).toEqual({
+      student: inMemoryStudentsRepository.items[0],
+    })
+  })
+
+  test('if password becomes hashed', async () => {
+    const result = await sut.execute({
+      name: 'Jhon Doe',
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    const hashedPassword = await fakeHasher.hash('123456')
+
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryStudentsRepository.items[0].password).toEqual(hashedPassword)
+  })
+})
+
+
+a gente copia ele e cola em um novo arquivo que vamos criar autenticate-student.spec.ts
+a gente faz as instanciações lebrando de trazer o fakeEncripter 
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let fakeHasher: FakeHasher
+let fakeEncrypter: FakeEncrypter
+let sut: AutenticateStudentUseCase
+
+describe('autenticate student test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    fakeHasher = new FakeHasher()
+    fakeEncrypter = new FakeEncrypter()
+    sut = new AutenticateStudentUseCase(
+      inMemoryStudentsRepository,
+      fakeHasher,
+      fakeEncrypter,
+    )
+  })
+
+  agora a gente vai começar os tentes 
+  para testar se é possivel autenticar um usuario antes de autenticar a gente precisa criar o usuario.
+  então para isso a gente tem as factoryes vamos então criar uma la nas factorioes para make-student.ts
+  mas antes temos que ir na entity student e exportar as props
+  export interface StudentProps {
+  name: string
+  email: string
+  password: string
+}
+
+e agora a gente pode usar o Student.create e a gente passa o nome o email e o password usando o faker e da override nas outras fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import {
+  Student,
+  StudentProps,
+} from '@/domain/forum/enterprise/entities/student'
+
+export function makeStudent(
+  override: Partial<StudentProps> = {},
+  id?: UniqueEntityId,
+) {
+  const student = Student.create(
+    {
+      name: faker.person.fullName(),
+      email: faker.internet.email(),
+      password: faker.internet.password(),
+      ...override,
+    },
+    id,
+  )
+
+  return student
+}
+
+agora a gente no teste faz o student usando o factory e passando na senha com o fakeHasher e passando tambem o email porque como vamos uar eles para logar a gente não quer que seja aleatorio criado pelo facotry
+
+  const student = makeStudent({
+      email: 'jhon@doe.com',
+      password: await fakeHasher.hash('123456'),
+    })
+
+    depois de gerar o student a gente salva ele no repositorio podemos usar o create ou o itens .push ambos funcionam;
+
+     inMemoryStudentsRepository.create(student)
+
+     agora fazemos o login com o email e senha
+
+        const result = await sut.execute({
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+esperamos que o retorno seja isRight
+e a gente espera tambem qe o result.value seja o assectoken que seja qualequer string
+test('if can autenticate a student', async () => {
+    const student = makeStudent({
+      email: 'jhon@doe.com',
+      password: await fakeHasher.hash('123456'),
+    })
+
+    inMemoryStudentsRepository.create(student)
+
+    const result = await sut.execute({
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value).toEqual({
+      accessToken: expect.any(String),
+    })
+  })
+
+  e so tem esse teste para autenticar. a gentepoderia ciar um regex para validar o jwt mas não vamos fazer isso porque é desnecessario.
+  a pagina toda fica assim:
+  import { AutenticateStudentUseCase } from './autenticate-student'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { FakeHasher } from 'test/cryptography/fake-hasher'
+
+import { FakeEncrypter } from 'test/cryptography/fake-encrypter'
+import { makeStudent } from 'test/factories/make-student'
+
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let fakeHasher: FakeHasher
+let fakeEncrypter: FakeEncrypter
+let sut: AutenticateStudentUseCase
+
+describe('autenticate student test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    fakeHasher = new FakeHasher()
+    fakeEncrypter = new FakeEncrypter()
+    sut = new AutenticateStudentUseCase(
+      inMemoryStudentsRepository,
+      fakeHasher,
+      fakeEncrypter,
+    )
+  })
+
+  test('if can autenticate a student', async () => {
+    const student = makeStudent({
+      email: 'jhon@doe.com',
+      password: await fakeHasher.hash('123456'),
+    })
+
+    inMemoryStudentsRepository.create(student)
+
+    const result = await sut.execute({
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value).toEqual({
+      accessToken: expect.any(String),
+    })
+  })
+})
+
+
 
