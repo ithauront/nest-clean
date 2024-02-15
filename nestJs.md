@@ -4559,4 +4559,70 @@ export class AutenticateStudentUseCase {
   }
 }
 
+## stubs de criptogrfia
+stub é uma classe para o contexto de testes que vai implementar os contratos de forma ficticia, apenas para os testes. o conceito é parecido com o que fizemos nos in memory repositories
+então dentro da pasta test a gente vai criar uma pasta cryptography e vams começar com o arquivo fake-hasher.ts
+a gente vai exportar a classe akeHAsher que vai implementar o HashGenerator e o HashComparer, nõa tem problema implmentar duas coisas.
+import { HashComparer } from "@/domain/forum/application/cryptography/hash-comparer";
+import { HashGenerator } from "@/domain/forum/application/cryptography/hash-generator";
+
+export class FakeHasher implements HashComparer, HashGenerator {
+    
+}
+
+agora dentro dela vamos dar o implmenet all unimplemented interfaces e ai ele ja cria os dois metodos para a gente adaptar
+import { HashComparer } from "@/domain/forum/application/cryptography/hash-comparer";
+import { HashGenerator } from "@/domain/forum/application/cryptography/hash-generator";
+
+export class FakeHasher implements HashComparer, HashGenerator {
+    compare(plain: string, hash: string): Promise<boolean> {
+        throw new Error("Method not implemented.");
+    }
+    hash(plain: string): Promise<string> {
+        throw new Error("Method not implemented.");
+    }
+
+}
+vamos colocar async na frente dos dois metodos. e como é para ser ficticio a gente não vai usar o bcrypt nem nada neles.
+então vamos fazer uma função de hash ficticia. a gente vai pegar o testo que o usuario esta enviando e vamoc concatenar no fim dele a string "-hashed" assim vai virar por exemplo 123456-hashed e a gente vai pelo menos saber que mudou.
+  async hash(plain: string): Promise<string> {
+    return plain.concat('-hashed')
+  }
+e no compare a gente vai pegar o plain que o usuario esta enviando concatenado com o hashed for igual a passworda gente retorna (em outras palavras vai ser true se não vai ser falso.)
+  async compare(plain: string, hash: string): Promise<boolean> {
+    return plain.concat('-hashed') === hash
+  }
+   a pagina fica assim:
+   import { HashComparer } from '@/domain/forum/application/cryptography/hash-comparer'
+import { HashGenerator } from '@/domain/forum/application/cryptography/hash-generator'
+
+export class FakeHasher implements HashComparer, HashGenerator {
+  async compare(plain: string, hash: string): Promise<boolean> {
+    return plain.concat('-hashed') === hash
+  }
+
+  async hash(plain: string): Promise<string> {
+    return plain.concat('-hashed')
+  }
+}
+
+agora vamos criar o fake-encrypter.ts
+fazemos a classe da mesma forma so que para o encripter
+import { Encrypter } from '@/domain/forum/application/cryptography/encrypter'
+
+export class FakeEncrypter implements Encrypter {
+  async encrypt(payload: Record<string, unknown>): Promise<string> {}
+}
+
+e agora temos que fazer o metodo.
+e ai a gente pega o payload e transforma em um string usando o json stringfy
+import { Encrypter } from '@/domain/forum/application/cryptography/encrypter'
+
+export class FakeEncrypter implements Encrypter {
+  async encrypt(payload: Record<string, unknown>): Promise<string> {
+    return JSON.stringify(payload)
+  }
+}
+
+a gente não precisa criar um acessToken nem nada disso;, é so para facilitar o testes unitarios então a gente manda um string qualquer e ja ta bom.
 
