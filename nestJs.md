@@ -4916,4 +4916,114 @@ describe('autenticate student test', () => {
 })
 
 
+# implementação de criptografia
+para fazer a implementação real da parte de criptografia vamos em infra criar uma pasta cryptography
+nela vamos criar um modulo cryptography.module.ts
+por enquanto ele fica assim:
+import { Module } from '@nestjs/common'
+
+@Module({})
+export class CryptographyModule {}
+
+
+agora vamos criar outro arquivo nessa pagina chamado bcrypt-hasher.ts essa vai ser ja a implementação real por isso o nome dele vai o bcrypt e vamos criar tambem o arquivo jwt-encrypter.ts
+o encripter a gente coloca pra implementar o encrypter e para ele ser injectable
+import { Encrypter } from "@/domain/forum/application/cryptography/encrypter";
+import { Injectable } from "@nestjs/common";
+
+@Injectable()
+export class JwtEncrypter implements Encrypter{
+    encrypt(payload: Record<string, unknown>): Promise<string> {
+        throw new Error("Method not implemented.");
+    }
+    
+}
+e para gerar um jwt no nest a gente precisa do jwt service que vem la do auth module.
+então a gente vai fazer um constructor para isso mesmo ela tendo dependencia em um outro modulo isso não tem problema nehum.
+e agora no nosso metodo a gente da um return this.jwtService.singasync porqeu estamos usando promisse e ai a gente passa o payoad  como estamos usando o singasync a gente nem precisa colocar o async na função e ai o encrypter fica assim:
+import { Encrypter } from '@/domain/forum/application/cryptography/encrypter'
+import { Injectable } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+
+@Injectable()
+export class JwtEncrypter implements Encrypter {
+  constructor(private jwtService: JwtService) {}
+  encrypt(payload: Record<string, unknown>): Promise<string> {
+    return this.jwtService.signAsync(payload)
+  }
+}
+
+
+agora vamos para o hasher.
+ele vai implementar anto o hashgenerator quanto o hashcomparer
+import { HashComparer } from '@/domain/forum/application/cryptography/hash-comparer'
+import { HashGenerator } from '@/domain/forum/application/cryptography/hash-generator'
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class BcryptHasher implements HashGenerator, HashComparer {
+  async hash(plain: string): Promise<string> {
+    throw new Error('Method not implemented.')
+  }
+
+  async compare(plain: string, hash: string): Promise<boolean> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+dentro deles a gente retorna a propri função de hash e de compare do bcrypt temos qjue tomar cuidaod para importar do bacrypt
+agora para o hash a gente passa o return a função de hash e passamos para ela o plain que a gente recebe e tambem o numero de rounds que é 8. mas a gente pode fazer uma configuração de antes das funções criar um private HASH_SALT_LENGTH = 8 e ai a gente passa essa hashsaltlength no local do numero de rounds assim fica configurado que sempre é 8
+@Injectable()
+export class BcryptHasher implements HashGenerator, HashComparer {
+  private HASH_SALT_LENGHT = 8
+  async hash(plain: string): Promise<string> {
+    return hash(plain, this.HASH_SALT_LENGHT)
+  }
+
+  agora para o metodo de compare e passamos para ele o plain e o hash
+  a pagfina fica assim:
+  import { HashComparer } from '@/domain/forum/application/cryptography/hash-comparer'
+import { HashGenerator } from '@/domain/forum/application/cryptography/hash-generator'
+import { Injectable } from '@nestjs/common'
+import { compare, hash } from 'bcryptjs'
+
+@Injectable()
+export class BcryptHasher implements HashGenerator, HashComparer {
+  private HASH_SALT_LENGHT = 8
+  async hash(plain: string): Promise<string> {
+    return hash(plain, this.HASH_SALT_LENGHT)
+  }
+
+  async compare(plain: string, hash: string): Promise<boolean> {
+    return compare(plain, hash)
+  }
+}
+
+
+agora a gente pode ir no modulo de criptografia
+e dentro do modules vamos colocar os providers e vamos fazer um pouco como fizemos nos repositrios quan do a gente for implementar uma interface a gente envia um objeto e nesse objeto a gente coloca provide: e passamos quamé a classe abstrata Encrypter e a gente da virgula UseClass e passamos qual classe queremos implementar que no caso é a JWTencripter
+providers: [{ provide: Encrypter, useClass: JwtEncrypter }],
+ou seja cada vez que houver uma classe que uso os contratos de encrypter (que é uma interface mas esta como classe abstrata) a gente vai usar a classe JWTencypter
+e a gente vai fazer igual com o hash comparer
+e no fim a gente da um export encrypter hashcomparer e hashgenerator assim todos os modulos que importarem esse modulo vao ter acesso a essas classes fica assim
+import { Encrypter } from '@/domain/forum/application/cryptography/encrypter'
+import { Module } from '@nestjs/common'
+import { JwtEncrypter } from './jwt-encrypter'
+import { HashComparer } from '@/domain/forum/application/cryptography/hash-comparer'
+import { BcryptHasher } from './bcrypt-hasher'
+import { HashGenerator } from '@/domain/forum/application/cryptography/hash-generator'
+
+@Module({
+  providers: [
+    { provide: Encrypter, useClass: JwtEncrypter },
+    { provide: HashComparer, useClass: BcryptHasher },
+    { provide: HashGenerator, useClass: BcryptHasher },
+  ],
+  exports: [Encrypter, HashComparer, HashGenerator],
+})
+export class CryptographyModule {}
+
+agora a gente pode refatorar os nossos controlers para usarem os nossos casos de uso que criamos.
+
+
 
