@@ -5025,5 +5025,236 @@ export class CryptographyModule {}
 
 agora a gente pode refatorar os nossos controlers para usarem os nossos casos de uso que criamos.
 
+vamos no nosso autenticate.controller na pasta http
+e vamos modificar ele para que ele funcione com os novos useCases e não bata mas diretamente no prisma ou no jwt
+no constructor dele a gente apaga as referencias ao prisma e ao jwt e faz um private autenticateStudent do tipo autenticatesutendusecase
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(private autenticateStudent: AutenticateStudentUseCase) {}
 
+  e vamos logo nonosso http module para passar esse useCase nos providers e vamos passar logo o register tambem fica assim:
+  import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+
+@Module({
+  imports: [DatabaseModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+  ],
+  providers: [
+    CreateQuestionUseCase,
+    ListRecentQuestionsUseCase,
+    AutenticateStudentUseCase,
+    RegisterStudentUseCase,
+  ],
+})
+export class HttpModule {}
+
+agora no nosso controller a gente recebe o email e a senha e a gente apaga todo o resto o controller fica assim antes de a gente começar a implementar nosso useCase nele
+import { Body, Controller, Post, UsePipes } from '@nestjs/common'
+import { z } from 'zod'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+
+const autenticateBodySchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type AutenticateBodySchema = z.infer<typeof autenticateBodySchema>
+
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(private autenticateStudent: AutenticateStudentUseCase) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(autenticateBodySchema))
+  async handle(@Body() body: AutenticateBodySchema) {
+    const { email, password } = body
+  }
+}
+
+
+ai a gente faz uma const result para ser o execute do useCase onde nos passamos o email e senha  const result = await this.autenticateStudent.execute({
+      email,
+      password,
+    })
+    e agora fazemos que se o resultado der erroou seja se ele for left a gente vai por enquanto so jogar um novo erro sem se preocupar muito em personalizar esse erro agora. e se der sucesso a gente pega o accesstoken de dentro do result.value e retorna ele fica asism a pagina:
+    import { Body, Controller, Post, UsePipes } from '@nestjs/common'
+import { z } from 'zod'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+
+const autenticateBodySchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type AutenticateBodySchema = z.infer<typeof autenticateBodySchema>
+
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(private autenticateStudent: AutenticateStudentUseCase) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(autenticateBodySchema))
+  async handle(@Body() body: AutenticateBodySchema) {
+    const { email, password } = body
+
+    const result = await this.autenticateStudent.execute({
+      email,
+      password,
+    })
+
+    if (result.isLeft()) {
+      throw new Error()
+    }
+
+    const { accessToken } = result.value
+
+     return {
+      access_token: accessToken,
+    }
+  }
+}
+
+agora para que funcione a gete precisa ir la no database module e passar o studentRepository para ele e temos que fazer o prismaStudentsRepository então vamos fazer isso pasta database/prisma/repositories e criamos o arquivo prisma-students-repository.ts 
+porem precisamos fazer o mapper ainda
+fica assim 
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { Student } from '@/domain/forum/enterprise/entities/student'
+import { PrismaStudentsMapper } from '../mappers/prisma-students-mapper'
+
+@Injectable()
+export class PrismaStudentsRepository implements StudentsRepository {
+  constructor(private prisma: PrismaService) {}
+
+  async findByEmail(email: string): Promise<Student | null> {
+    const student = await this.prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!student) {
+      return null
+    }
+    return PrismaStudentsMapper.toDomain(student)
+  }
+
+  async create(student: Student): Promise<void> {
+    const data = PrismaStudentsMapper.toPrisma(student)
+
+    await this.prisma.user.create({
+      data,
+    })
+  }
+}
+
+e o mapper a gente faz um na pasta mapper e ele fica assim
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Student } from '@/domain/forum/enterprise/entities/student'
+import { User as PrismaUser, Prisma } from '@prisma/client'
+
+export class PrismaStudentsMapper {
+  static toDomain(raw: PrismaUser): Student {
+    return Student.create(
+      {
+        name: raw.name,
+        email: raw.email,
+        password: raw.password,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(student: Student): Prisma.UserUncheckedCreateInput {
+    return {
+      id: student.id.toString(),
+      name: student.name,
+      email: student.email,
+      password: student.password,
+    }
+  }
+}
+
+agora podemos ir para o database.module e colocar ele no prvider e tammbem no export para que ele possa ser implementado em quem usar a classe fica assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { PrismaStudentsRepository } from './repositories/prisma-students-repository'
+
+@Module({
+  providers: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    { provide: QuestionsRepository, useClass: PrismaQuestionsRepository },
+    { provide: StudentsRepository, useClass: PrismaStudentsRepository },
+  ],
+  exports: [
+    PrismaService,
+    PrismaAnswerAttachmentRepository,
+    PrismaAnswersRepository,
+    PrismaAnswerCommentsRepository,
+    PrismaQuestionAttachmentsRepository,
+    PrismaQuestionCommentsRepository,
+    QuestionsRepository,
+    StudentsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+agora vamos la no httpModule e importamos o cryptography module o http module fica assim:
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+import { CryptographyModule } from '../cryptography/cryptography.module'
+
+@Module({
+  imports: [DatabaseModule, CryptographyModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+  ],
+  providers: [
+    CreateQuestionUseCase,
+    ListRecentQuestionsUseCase,
+    AutenticateStudentUseCase,
+    RegisterStudentUseCase,
+  ],
+})
+export class HttpModule {}
+
+e agora se a gente rodar o banco de dados e tambem a aplicação e a gente for no clienthttp e pedir para autenticar ele deve devolver o access-token. ta funcionando.
 
