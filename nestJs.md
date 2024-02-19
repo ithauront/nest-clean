@@ -5532,3 +5532,232 @@ export class CreateQuestionController {
   }
 }
 
+
+# rotas privadas por padrao
+agora nos vamos começar a fazer muitas rotas na aplicaçéao com muitas funcionalidades. e geralmente a gente vem usando o guard para dizer quais rotas o usuario precisa estar autenticado para usar. porem é muito comum a gente fazer o contrario e dizer apenas as que ele não precisa estar autenticado, até porque geralmente o numero é bem menor.
+e assim por padrão a gente vai dizer que todas as rotas da aplicação o usuario precisa estar autenticado
+vamos no auth.module
+na parte de providers a gente vai passar um objeto
+e usar o jwt authguard
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard
+    },
+
+
+assim o app_guard a gente importa do proprio nest e o jwt é a classe que a gente criou.
+o app guard é uma forma de registrar um guard de forma global.
+o auth module fica assim:
+import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { Env } from '@/infra/env'
+import { JwtStrategy } from './jtw.strategy'
+import { APP_GUARD } from '@nestjs/core'
+import { JwtAuthGuard } from './jwt-auth.guard'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      global: true,
+      async useFactory(config: ConfigService<Env, true>) {
+        const privateKey = config.get('JWT_PRIVATE_KEY', { infer: true })
+        const publicKey = config.get('JWT_PUBLIC_KEY', { infer: true })
+
+        return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+        }
+      },
+    }),
+  ],
+  providers: [
+    JwtStrategy,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
+})
+export class AuthModule {}
+
+agora nos controllesr a gfente pode tirar o nosso guard
+no create question, fetchquestions e no é so tirar a linha @useGuard nos arquivos e a importaçéao tambem
+e ele deve continuar fazendo as autenticações
+e agora a gente precisa tirar a autenticação da rta de criação de conte e autenticação
+e para isso a gente tem criar um PUBLIC que é uma forma de falar que a rota é publica
+o authGuard busca de dentro do metadata do nest o metadata é uma forma de transitar informações entre midlewares
+esse authGaurd busca um metadado chamado IS_PUBLIC e se ele existir e estiver como true ele diz que essa rota é publica
+entéao dentro dapasta auth a gente vai criar um arquivo chamado public.ts e nele a gente cola isso:
+import { SetMetadata } from '@nestjs/common'
+
+export const IS_PUBLIC_KEY = 'isPublic'
+export const Public = () => SetMetadata(IS_PUBLIC_KEY, true)
+
+agora com isso a gente pode ir la no autenticate.controller e a gente coloca abaixo do @controller esse decorator que a gente criou @Public() importando ele de infra/auth/public.ts
+fica assim:
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  UnauthorizedException,
+  UsePipes,
+} from '@nestjs/common'
+import { z } from 'zod'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { WrongCredentialsError } from '@/domain/forum/application/use-cases/errors/wrong-credentials-error'
+import { Public } from '@/infra/auth/public'
+
+const autenticateBodySchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type AutenticateBodySchema = z.infer<typeof autenticateBodySchema>
+
+@Controller('/sessions')
+@Public()
+export class AutenticateController {
+  constructor(private autenticateStudent: AutenticateStudentUseCase) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(autenticateBodySchema))
+  async handle(@Body() body: AutenticateBodySchema) {
+    const { email, password } = body
+
+    const result = await this.autenticateStudent.execute({
+      email,
+      password,
+    })
+
+    if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case WrongCredentialsError:
+          throw new UnauthorizedException(error.message)
+
+        default:
+          throw new BadRequestException(error.message)
+      }
+    }
+
+    const { accessToken } = result.value
+
+    return {
+      access_token: accessToken,
+    }
+  }
+}
+
+e no createAccountController a gente faz igual e fica assim:
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  HttpCode,
+  Post,
+  UsePipes,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+import { StudentAlreadyExistsError } from '@/domain/forum/application/use-cases/errors/student-already-exists-error'
+import { Public } from '@/infra/auth/public'
+
+const createAccountBodySchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type CreateAccountBodySchema = z.infer<typeof createAccountBodySchema>
+
+@Controller('/accounts')
+@Public()
+export class CreateAccountController {
+  constructor(private registeStudent: RegisterStudentUseCase) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(createAccountBodySchema))
+  @HttpCode(201)
+  async handle(@Body() body: CreateAccountBodySchema) {
+    const { name, email, password } = body
+    const result = await this.registeStudent.execute({
+      name,
+      email,
+      password,
+    })
+    if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case StudentAlreadyExistsError:
+          throw new ConflictException(error.message)
+
+        default:
+          throw new BadRequestException(error.message)
+      }
+    }
+  }
+}
+
+porem ainda vai dar erro porque faltou a gente configurar no jwtAuthGuard então vamos abrir o JWTauthguard que esta na pasta auth
+e dentro da class que esta o authguard
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+a gente vai jogar esse codigo que a gente pode copiar da documentaçéao do nest
+ constructor(private reflector: Reflector) {
+    super()
+  }
+
+  canActivate(context: ExecutionContext) {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ])
+
+    if (isPublic) {
+      return true
+    }
+    return super.canActivate(context)
+  }
+
+a gente vem no tsconfig e retira essa linha para néao ficar dando erro
+ "declaration": true,
+ (no meiu néao estava dando erro mas eu preferi remover para ficar igual o da rocketseat)
+ o declaration true é para ele gerar os arquivos .d.ts quando a gente fizer a bulid do ts e como no nest a gente gera o codigo com JS na produção ai não precisa tanto.
+ a pagina auth.guard fica assim
+ import { AuthGuard } from '@nestjs/passport'
+import { IS_PUBLIC_KEY } from './public'
+import { ExecutionContext } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  constructor(private reflector: Reflector) {
+    super()
+  }
+
+  canActivate(context: ExecutionContext) {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ])
+
+    if (isPublic) {
+      return true
+    }
+    return super.canActivate(context)
+  }
+}
+
+e esse codigo esta buscando de dentro do metadata o IS_PUBLIC_Key
+e se a publicKey for true ele diz que o usuario pode acessar aquela rota retornando um true se néao ou seja se não existir a publicKey ele vai fazer a verificação tradicional que a gente setou no module. não podemos eswuecer de colocar o injectable porque sem o injectable o reflector néao vai ser injetado.
