@@ -5307,5 +5307,228 @@ export class CreateAccountController {
   }
 }
 
+## tratamento de erros
+agora vamos fazer a tratamento de erros.
+nos nossos casos de uso a gente ja esta retornando erros diferentes para cada situação. porem no controller a gente tem um erro padrão sendo jogado.
+então o que vamos fazer é que no controller quando acontecer um erro a gente vai pegar qual erro aconteceu.
+ const error = result.value
 
+ e nos vamos fazer um switch(error.constructor) ou seja vamos usar a chamada da swithc e vamos pegar o constructor do erro que vai basicamente retornar qual classe originou esse erro. então fica assim:
+  if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+      }
+    }
+    gora temos que dizer o que fazer quando ele pegar esse constructor.
+    e caso o erro seja originario na classe wrongCredentials a gente vai jogar o unauthorizedException que ja vem do nest e passar a mensgam de erro que vem do useCase fica assim:
+     if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case WrongCredentialsError:
+          throw new UnauthorizedException(error.message)
+      }
+    }
+
+    e se acontecer qualquer outro erro qe não seja esse a gente vai dar um thwro new badRequestException usando o defalt e ai ele vai pegar qualquer erro esperado e vai dar isso. caso seja um erro inesperado ele não vai bater no result is.left ai o proprio nest vai devolver um erro 500
+    a pagina de autenticate fica assim:
+    import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  UnauthorizedException,
+  UsePipes,
+} from '@nestjs/common'
+import { z } from 'zod'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { WrongCredentialsError } from '@/domain/forum/application/use-cases/errors/wrong-credentials-error'
+
+const autenticateBodySchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type AutenticateBodySchema = z.infer<typeof autenticateBodySchema>
+
+@Controller('/sessions')
+export class AutenticateController {
+  constructor(private autenticateStudent: AutenticateStudentUseCase) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(autenticateBodySchema))
+  async handle(@Body() body: AutenticateBodySchema) {
+    const { email, password } = body
+
+    const result = await this.autenticateStudent.execute({
+      email,
+      password,
+    })
+
+    if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case WrongCredentialsError:
+          throw new UnauthorizedException(error.message)
+
+        default:
+          throw new BadRequestException(error.message)
+      }
+    }
+
+    const { accessToken } = result.value
+
+    return {
+      access_token: accessToken,
+    }
+  }
+}
+
+agora a gente copia essa parte do erro evamos para a pagina de createaccount e cola la na parte do erro. mas mudamos os tipos de erro com excessão do bad request. a pagina fica assim:
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  HttpCode,
+  Post,
+  UsePipes,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+import { StudentAlreadyExistsError } from '@/domain/forum/application/use-cases/errors/student-already-exists-error'
+
+const createAccountBodySchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string(),
+})
+
+type CreateAccountBodySchema = z.infer<typeof createAccountBodySchema>
+
+@Controller('/accounts')
+export class CreateAccountController {
+  constructor(private registeStudent: RegisterStudentUseCase) {}
+
+  @Post()
+  @UsePipes(new ZodValidationPipe(createAccountBodySchema))
+  @HttpCode(201)
+  async handle(@Body() body: CreateAccountBodySchema) {
+    const { name, email, password } = body
+    const result = await this.registeStudent.execute({
+      name,
+      email,
+      password,
+    })
+    if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case StudentAlreadyExistsError:
+          throw new ConflictException(error.message)
+
+        default:
+          throw new BadRequestException(error.message)
+      }
+    }
+  }
+}
+
+agora vamos para o fetchRecentQuestionController e como ele néao tem nenhum erro esperado a gente vai jogar so o badRequest nele. a pagina fica assim
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
+import { JwtAuthGuard } from '@/infra/auth/jwt-auth.guard'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+import { QuestionPresenter } from '../presenters/question-presenter'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class FetchRecentQuestionsController {
+  constructor(private listRecentQuestions: ListRecentQuestionsUseCase) {}
+
+  @Get()
+  async handle(@Query('page', queryValidationPipe) page: PageParamsTypeSchema) {
+    const result = await this.listRecentQuestions.execute({
+      page,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+    const questions = result.value.questions
+
+    return { questions: questions.map(QuestionPresenter.toHTTP) }
+  }
+}
+
+agora vamos no createquestion e fazemso tambem so esse badRequest porem temos tambem que transformar o await na const resulta a pagina fica assim:
+
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { JwtAuthGuard } from '@/infra/auth/jwt-auth.guard'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(createQuestionBodySchema)
+
+type CreateQuestionBodySchema = z.infer<typeof createQuestionBodySchema>
+
+@Controller('/questions')
+@UseGuards(JwtAuthGuard)
+export class CreateQuestionController {
+  constructor(private createQuestion: CreateQuestionUseCase) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: CreateQuestionBodySchema,
+  ) {
+    const { title, content } = body
+    const userId = user.sub
+
+    const result = await this.createQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: [],
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
 
