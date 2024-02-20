@@ -6029,6 +6029,306 @@ import { EnvModule } from '../env/env.module'
 })
 export class AuthModule {}
 
+# finalizando o schema no prisma
+vamos criar no schema do prisma os models para comments e para attachments
+colocamos logo um id nelas com @id e o deault sendo uuid
+agora vamos colocar alguns campos comuns o comments vai ter content e o attachment vai ter title e url.
+no comentario vamos colocar o createdAt e o updatedAt dentro dele
+e vamos usar o @@map() para renomear os nomes das tabelas
+
+model Comment {
+  id        String    @id @default(uuid())
+  content   String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+
+  @@map("comments")
+}
+
+model Attachment {
+  id    String @id @default(uuid())
+  title String
+  url   String
+
+  @@map("attachments")
+}
+
+agora nos vamos criar os relacionamentos. um comentario sempre vai ter um author e ese authornvai ser o user entéao se a gente colocar author User e salvar ele cria o relacionamento
+mas a gente muda o userId por author Id e agente faz um map para usar o underline nos coments então adiciona isso:
+  author User   @relation(fields: [authorId], references: [id])
+  authorId String @map("author_id")
+  vaos subir o authorId para cima so para ele ficar junto com os outros atributos
+  em user ele criou o relacionamento inverso então a gente so precisa troca de Comment para comments para ficar no padrão fica assim:
+  model User {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  password  String
+  role      UserRole   @default(STUDENT)
+  questions Question[]
+  answers   Answer[]
+  comments   Comment[]
+
+  @@map("users")
+}
+
+agora precisamos criar os relacionamentos do comentario a pergunta e a resposta. e é interessante que tanto o anexo quanto o comentario podem pertecer tanto a pegunta quanto aresposta
+tem varias formas de resolver isso. uma das formas é o polimorfismo em que uma classe atende a propositos diferentes e no contexto de banco de dados a gente pode pensar em uma tabela que armazena dois tipos de informações que é o nosso caso com os comentarios que podem ser tanto de uma resposta quanto de uma pergunta. porem como saber se é de pergunta ou resposta o que a gente faz geralmente é colocar um parentId String que vai armazenar o id da resposta ou da pergunta mas ainda assim a gente precisa ter uma forma de identificar se é pergunta ou resposta e ai a gente pode ter um parentType e ai a gente cria um enum como comentType para ser question ou answer
+
+enum CommentType {
+  QUESTION
+  ANSWER
+}
+
+model Comment {
+  id        String    @id @default(uuid())
+  content   String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  authorId  String    @map("author_id")
+
+  parentId   String
+  parentType CommentType
+
+  porem isso traz alguns desafios porque a gente dessa forma por exemplo não pode atribuir esse parentId como se fosse uma foreing key porque uma foreing key representa apenas uma tabela e não duas então a gente teria que marcar essa parentId no maximo com um index. alem disso o prisma não lida muito bem com polimorfismo. então seria uma solução valida mas nos não vamos usar ela.
+  como o comentario so vai ser relacionar com duas tabelas tem uma maneira mais facil de resolver. para resolver com polimorfismo so vameria a pena se fosse uma conexão com um numero muito grande de tabelas tipo umas 40
+  a gente vai criar um relacionamento do comentario com a pergunta e vai colocar ele como opcional igual com o relacionamento para a answer a gente faz answer? Answer e question? Question
+  e salvamos el vai criar os campoe e a gente ajusta onde eles ficam na tabele a efazemos o mapeamento para passar o underline fica assim:
+  model Comment {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String?   @map("question_id")
+  answerId   String?   @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+  author   User      @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+com isso quando for um comentario de pergunta o que vai estar preenchido é o question Id não vai ser nulo e so de ver qual não esta nulo serve como o type
+e agora vamos arrumar tambem os nomes nas tabelas de comments e de answer
+  comments Comment[]
+
+  e agora vamos fazer igual no attachment então vamos copiar o que colocarmos no comment no attachment para ele ficar assim:
+  model Attachment {
+  id         String  @id @default(uuid())
+  title      String
+  url        String
+  questionId String? @map("question_id")
+  answerId   String? @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+
+  @@map("attachments")
+}
+
+agora ao salvarmos a gente tem que ir corrigir o attachment nas tabelas de comment e answer para ficar assim:
+attachment   Attachment[]
+
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+}
+
+model User {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  password  String
+  role      UserRole   @default(STUDENT)
+  questions Question[]
+  answers   Answer[]
+  comments  Comment[]
+
+  @@map("users")
+}
+
+model Question {
+  id           String    @id @default(uuid())
+  title        String
+  slug         String    @unique
+  content      String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  authorId     String    @map("author_id")
+  bestAnswerId String?   @unique @map("best_answer_id")
+
+  author     User    @relation(fields: [authorId], references: [id])
+  bestAnswer Answer? @relation("bestAnswer", fields: [bestAnswerId], references: [id])
+
+  answers    Answer[]
+  comments   Comment[]
+  attachment Attachment[]
+
+  @@map("questions")
+}
+
+model Answer {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String    @map("question_id")
+
+  author       User         @relation(fields: [authorId], references: [id])
+  bestAnswerOn Question?    @relation("bestAnswer")
+  question     Question     @relation(fields: [questionId], references: [id])
+  comments     Comment[]
+  attachment   Attachment[]
+
+  @@map("answers")
+}
+
+model Comment {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String?   @map("question_id")
+  answerId   String?   @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+  author   User      @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+
+model Attachment {
+  id         String  @id @default(uuid())
+  title      String
+  url        String
+  questionId String? @map("question_id")
+  answerId   String? @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+
+  @@map("attachments")
+}
+
+a pagina toda fica assim
+:
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+}
+
+model User {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  password  String
+  role      UserRole   @default(STUDENT)
+  questions Question[]
+  answers   Answer[]
+  comments  Comment[]
+
+  @@map("users")
+}
+
+model Question {
+  id           String    @id @default(uuid())
+  title        String
+  slug         String    @unique
+  content      String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  authorId     String    @map("author_id")
+  bestAnswerId String?   @unique @map("best_answer_id")
+
+  author     User    @relation(fields: [authorId], references: [id])
+  bestAnswer Answer? @relation("bestAnswer", fields: [bestAnswerId], references: [id])
+
+  answers    Answer[]
+  comments   Comment[]
+  attachment Attachment[]
+
+  @@map("questions")
+}
+
+model Answer {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String    @map("question_id")
+
+  author       User         @relation(fields: [authorId], references: [id])
+  bestAnswerOn Question?    @relation("bestAnswer")
+  question     Question     @relation(fields: [questionId], references: [id])
+  comments     Comment[]
+  attachment   Attachment[]
+
+  @@map("answers")
+}
+
+model Comment {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String?   @map("question_id")
+  answerId   String?   @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+  author   User      @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+
+model Attachment {
+  id         String  @id @default(uuid())
+  title      String
+  url        String
+  questionId String? @map("question_id")
+  answerId   String? @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+
+  @@map("attachments")
+}
+
+agora a gente pode rodar a migration
+npx prisma migrate dev
+com o docker rodando.
+ele vai pedir um nome a gente diz create comments and attachments
+e depois disso a tabela vai funcionar agora com todas essas tabaleas.
 
 
 
