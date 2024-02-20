@@ -5761,3 +5761,274 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
 e esse codigo esta buscando de dentro do metadata o IS_PUBLIC_Key
 e se a publicKey for true ele diz que o usuario pode acessar aquela rota retornando um true se néao ou seja se não existir a publicKey ele vai fazer a verificação tradicional que a gente setou no module. não podemos eswuecer de colocar o injectable porque sem o injectable o reflector néao vai ser injetado.
+
+# env module
+toda vez que a gente for usar o configService para buscar uma variavel ambiente a gente precisa fazer toda a tipagem la do env, true ets como aqui no main.ts
+  const configService = app.get<ConfigService<Env, true>>(ConfigService)
+    const port = configService.get('PORT', { infer: true })
+
+a gente usa isso no authmodule e no jwt straegy tambem.
+para mudar isso a gente pode dentro do infra criar um env.service.ts
+e nele a gente cria nossa propria class envService com injectable
+import { Injectable } from '@nestjs/common'
+
+@Injectable()
+export class EnvService {}
+
+e dentro dela a gente vai criar um construtor para fazer a inversão de dependencia
+do configService do proprio nest e ai nesse configService que esta no construtor a gente pode ja tipar ele passando o Env das variaveis ambientes e true no segundo argumento
+  constructor(private configService: ConfigService<Env, true>) {}
+
+  e agora a gente cria um unico metodo chamado get que vai receber quam a chave que ele vai querer das variaveis ambeintes e essa chave a gente vai tipar como keyOf Env e keyof é um padrão que pega como env sendo um objeto ele retornar todas as possiveis chaves. e a gente retorna então o this.configService.get pegando a key e ja dando o infer como true fica assim:
+  import { Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { Env } from './env'
+
+@Injectable()
+export class EnvService {
+  constructor(private configService: ConfigService<Env, true>) {}
+
+  get(key: keyof Env) {
+    return this.configService.get(key, { infer: true })
+  }
+}
+
+assim a gente criou um helper que ja faz toda awuela configuração apra a gente
+agora vamos no app.modules colocamos um providers e passamos o envService
+import { Module } from '@nestjs/common'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env'
+import { AuthModule } from './auth/auth.module'
+import { HttpModule } from './http/http.module'
+import { EnvService } from './env.service'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    AuthModule,
+    HttpModule,
+  ],
+  providers: [EnvService],
+})
+export class AppModule {}
+
+com isso a gente pode ir agora no main e ao invez de fazer o app.get no configservice a gente vai pegar so o envService e néao vai mais precisar passar tudo aquilo para pegar a porta vai ser so envService.get(port)
+isso:
+const configService = app.get<ConfigService<Env, true>>(ConfigService)
+se torna isso:
+ const envService = app.get(EnvService)
+ e isso:
+  const port = configService.get('PORT', { infer: true })
+  se torna isso:
+    const port = envService.get('PORT')
+    fica a pagina toda bem menor assim; e ja com tudo tipado:
+    import { NestFactory } from '@nestjs/core'
+import { AppModule } from './app.module'
+import { EnvService } from './env.service'
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule)
+
+  const envService = app.get(EnvService)
+  const port = envService.get('PORT')
+
+  await app.listen(port)
+}
+bootstrap()
+
+
+agora vamos no authModule e onde estamos injetando o onfigService a gente vai injetar o envService
+e onde tem config como aqui
+config: ConfigService<Env, true>
+a gente vai pegar o env:EnvService
+e depois podemus usar o env.get assim sem passar o infer
+ const privateKey = env.get('JWT_PRIVATE_KEY')
+        const publicKey = env.get('JWT_PUBLIC_KEY')
+  a pagina fica assim porem da erro porque ele ta chando que as key podem ser string ou numero:
+  import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { Env } from '@/infra/env'
+import { JwtStrategy } from './jtw.strategy'
+import { APP_GUARD } from '@nestjs/core'
+import { JwtAuthGuard } from './jwt-auth.guard'
+import { EnvService } from '../env.service'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [EnvService],
+      global: true,
+      async useFactory(env: EnvService) {
+        const privateKey = env.get('JWT_PRIVATE_KEY')
+        const publicKey = env.get('JWT_PUBLIC_KEY')
+
+        return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+        }
+      },
+    }),
+  ],
+  providers: [
+    JwtStrategy,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
+})
+export class AuthModule {}
+
+para resolver isso a gente tem que ir no
+envService e passar
+ get<T extends keyof Env>(key: T) {
+  ou seja no get a gente coloca para o tipo extender o tipo de chave de Env e a chave vai ficar tipada como T
+  e ai para de dar erro no authModule
+isso é o uso de generics no typescript o get recebe uma generic de qual chave q gente quer pegar do env e a gente quer que essa chave herde a chave que estamos enviando como parametro e para fazer isso a gente cria um generique e fala que o parametro que o usuario envie vai ser assinado a esse generic que a gente colocou chamado T e apartir desse momento o T equivale a o que o usuario mandou como key 
+agora a pagina de env.service ficou assim:
+import { Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { Env } from './env'
+
+@Injectable()
+export class EnvService {
+  constructor(private configService: ConfigService<Env, true>) {}
+
+  get<T extends keyof Env>(key: T) {
+    return this.configService.get(key, { infer: true })
+  }
+}
+
+agora o ultimio que esta faltando é o jtwStrategy a gente tambem esta usando o configService e trocamos pelo EnvService que não vai precisar do generic que o configService estava pegando fica assim
+constructor(env: EnvService) {
+    const publicKey = env.get('JWT_PUBLIC_KEY')
+    a pagina toda assim:
+    import { Injectable } from '@nestjs/common'
+import { PassportStrategy } from '@nestjs/passport'
+import { ExtractJwt, Strategy } from 'passport-jwt'
+import { z } from 'zod'
+import { EnvService } from '../env.service'
+
+const tokenPayloadSchema = z.object({
+  sub: z.string().uuid(),
+})
+
+export type UserPayload = z.infer<typeof tokenPayloadSchema>
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(env: EnvService) {
+    const publicKey = env.get('JWT_PUBLIC_KEY')
+
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      secretOrKey: Buffer.from(publicKey, 'base64'),
+      algorithms: ['RS256'],
+    })
+  }
+
+  async validate(payload: UserPayload) {
+    return tokenPayloadSchema.parse(payload)
+  }
+}
+
+agora a gente tem que vir no authModule e vamos ter que mudar um pouco as coisas porque o JWTModule ele é tratado como se fosse um outro modulo e por isso se a gente passar o envService como provider eele néao vai funcioanr
+e dentro do register Asyn ele não tem como passar novos providers aqui:
+ JwtModule.registerAsync({
+      inject: [EnvService],
+      global: true,
+      async useFactory(env: EnvService) {
+        const privateKey = env.get('JWT_PRIVATE_KEY')
+        const publicKey = env.get('JWT_PUBLIC_KEY')
+
+        return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+        }
+      },
+    }),
+
+    então o que nos vamos fazer é dentro de infra a gente vai criar uma pasta chamada env e dentro dela vamos jogar o envService o env.ts e talbel vamos criar um env.module.ts
+    e ai a gente vai criar a classe envModules fazer o decorator modules e dentro desse decorator a gente passa os providers envService e exports envService tambem para ele ficar acessivel
+    import { Module } from '@nestjs/common'
+import { EnvService } from './env.service'
+
+@Module({
+  providers: [EnvService],
+  exports: [EnvService],
+})
+export class EnvModule {}
+
+agora vamos no main no strategy e no authmodulo arrumar a importação do enService
+no app/module a gente tira o envService do providers e passa o envModule nos imprts
+import { Module } from '@nestjs/common'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env/env'
+import { AuthModule } from './auth/auth.module'
+import { HttpModule } from './http/http.module'
+import { EnvModule } from './env/env.module'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    AuthModule,
+    HttpModule,
+    EnvModule,
+  ],
+})
+export class AppModule {}
+
+e agora no nosso authModule como o envModule é um modulo a gente pode ir la no registerAsync e imports o envModule o authModule deve ficar assim:
+import { Module } from '@nestjs/common'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { JwtStrategy } from './jtw.strategy'
+import { APP_GUARD } from '@nestjs/core'
+import { JwtAuthGuard } from './jwt-auth.guard'
+import { EnvService } from '../env/env.service'
+import { EnvModule } from '../env/env.module'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      imports: [EnvModule],
+      inject: [EnvService],
+      global: true,
+      async useFactory(env: EnvService) {
+        const privateKey = env.get('JWT_PRIVATE_KEY')
+        const publicKey = env.get('JWT_PUBLIC_KEY')
+
+        return {
+          signOptions: { algorithm: 'RS256' },
+          privateKey: Buffer.from(privateKey, 'base64'),
+          publicKey: Buffer.from(publicKey, 'base64'),
+        }
+      },
+    }),
+  ],
+  providers: [
+    JwtStrategy,
+    EnvService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
+})
+export class AuthModule {}
+
+
+
+
