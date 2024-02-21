@@ -6535,4 +6535,272 @@ export class PrismaAnswerAttachmentMapper {
   }
 }
 
+# implementando os repositorios
+agora vamos finalizar os repositorios
+no prisma answers repository a gente coloca o construtor e tambem faz o metodo findById
+export class PrismaAnswersRepository implements AnswersRepository {
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<Answer | null> {
+    const answer = await this.prisma.answer.findUnique({
+      where: {
+        id,
+      },
+    })
+    if (!answer) {
+      return null
+    }
+
+    return PrismaAnswerMapper.toDomain(answer)
+  }
+ o prosimo metodo fica assim:
+   async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<Answer[]> {
+    const answer = await this.prisma.answer.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answer.map(PrismaAnswerMapper.toDomain)
+  }
+  e fazemos tambem o create save e delete pegando do questions e fazendo alterações fica tudo assim:
+ import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { Answer } from '@/domain/forum/enterprise/entities/answer'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerMapper } from '../mappers/prisma-answer-mapper'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+
+@Injectable()
+export class PrismaAnswersRepository implements AnswersRepository {
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<Answer | null> {
+    const answer = await this.prisma.answer.findUnique({
+      where: {
+        id,
+      },
+    })
+    if (!answer) {
+      return null
+    }
+
+    return PrismaAnswerMapper.toDomain(answer)
+  }
+
+  async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<Answer[]> {
+    const answer = await this.prisma.answer.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answer.map(PrismaAnswerMapper.toDomain)
+  }
+
+  async create(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+    await this.prisma.answer.create({
+      data,
+    })
+  }
+
+  async delete(answer: Answer): Promise<void> {
+    await this.prisma.answer.delete({ where: { id: answer.id.toString() } })
+  }
+
+  async save(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+    await this.prisma.answer.update({
+      where: { id: data.id },
+      data,
+    })
+  }
+}
+
+no delete a gente nem precisa entrar pelo mapper por que ele so vai deletar e nao vai salvar nada.
+
+vamos para o questionComments e vamos fazendo as mesmas coisas com os mesmos metodos
+a pagina fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { QuestionComment } from '@/domain/forum/enterprise/entities/question-comment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionCommentMapper } from '../mappers/prisma-question-comment-mapper'
+
+@Injectable()
+export class PrismaQuestionCommentsRepository
+  implements QuestionCommentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<QuestionComment | null> {
+    const questionComment = await this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!questionComment) {
+      return null
+    }
+    return PrismaQuestionCommentMapper.toDomain(questionComment)
+  }
+
+  async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<QuestionComment[]> {
+    const questionsComment = await this.prisma.comment.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questionsComment.map(PrismaQuestionCommentMapper.toDomain)
+  }
+
+  async create(questionComment: QuestionComment): Promise<void> {
+    const data = PrismaQuestionCommentMapper.toPrisma(questionComment)
+    await this.prisma.comment.create({
+      data,
+    })
+  }
+
+  async delete(questionComment: QuestionComment): Promise<void> {
+    await this.prisma.comment.delete({
+      where: { id: questionComment.id.toString() },
+    })
+  }
+}
+
+par ao prisma answerComment a gente pode copiar todos os metodos e o contructoe do questionComments e colar e deve fucnionar depois de substituir wuestion por answer e importar as dependencias. a pagina fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerCommentMapper } from '../mappers/prisma-answer-comment-mapper'
+
+@Injectable()
+export class PrismaAnswerCommentsRepository
+  implements AnswerCommentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<AnswerComment | null> {
+    const answerComment = await this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!answerComment) {
+      return null
+    }
+    return PrismaAnswerCommentMapper.toDomain(answerComment)
+  }
+
+  async findManyByAnswerId(
+    answerId: string,
+    { page }: PaginationParams,
+  ): Promise<AnswerComment[]> {
+    const answersComment = await this.prisma.comment.findMany({
+      where: { answerId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answersComment.map(PrismaAnswerCommentMapper.toDomain)
+  }
+
+  async create(answerComment: AnswerComment): Promise<void> {
+    const data = PrismaAnswerCommentMapper.toPrisma(answerComment)
+    await this.prisma.comment.create({
+      data,
+    })
+  }
+
+  async delete(answerComment: AnswerComment): Promise<void> {
+    await this.prisma.comment.delete({
+      where: { id: answerComment.id.toString() },
+    })
+  }
+}
+
+agora o prisma question attachments fica assim:
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionAttachmentMapper } from '../mappers/prisma-question-attachment-mapper'
+
+@Injectable()
+export class PrismaQuestionAttachmentsRepository
+  implements QuestionAttachmentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+
+  async findManyByQuestionId(
+    questionId: string,
+  ): Promise<QuestionAttachment[]> {
+    const questionAttachments = await this.prisma.attachment.findMany({
+      where: { questionId },
+    })
+    return questionAttachments.map(PrismaQuestionAttachmentMapper.toDomain)
+  }
+
+  async deleteManyByQuestionId(questionId: string): Promise<void> {
+    await this.prisma.attachment.deleteMany({
+      where: { questionId },
+    })
+  }
+}
+
+e o answer attachmentsfica assim
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerAttachment } from '@/domain/forum/enterprise/entities/answer-attachment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerAttachmentMapper } from '../mappers/prisma-answer-attachment-mapper'
+
+@Injectable()
+export class PrismaAnswerAttachmentsRepository
+  implements AnswerAttachmentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+
+  async findManyByAnswerId(answerId: string): Promise<AnswerAttachment[]> {
+    const answerAttachments = await this.prisma.attachment.findMany({
+      where: { answerId },
+    })
+    return answerAttachments.map(PrismaAnswerAttachmentMapper.toDomain)
+  }
+
+  async deleteManyByAnswerId(answerId: string): Promise<void> {
+    await this.prisma.attachment.deleteMany({
+      where: { answerId },
+    })
+  }
+}
+
+com isso todos os repositorios estão implementados.
+
+
+
 
