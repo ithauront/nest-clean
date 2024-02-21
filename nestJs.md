@@ -6330,5 +6330,209 @@ com o docker rodando.
 ele vai pedir um nome a gente diz create comments and attachments
 e depois disso a tabela vai funcionar agora com todas essas tabaleas.
 
+# criando mappers do prisma
+vamos agora criar os mappers que estão faltando paraa nossa aplicação
+o objetivo do mapper é alterar ou converter uma entidade da camada de dominio para uma entidade de persistencia como o banco de dados no nosso caso o prisma
+não necessariamente cada entidade que a gente tem na camada de dominio vai representar uma tabela no banco de dados. como a gente viu por exemplo do questionComment ou answerComment que tem a mesma tabela
+vamos criar lgo todos os arquivos e depois a gente vai enchendo eles
+prisma-answer-mapper.ts
+prisma-question-comment-mapper.ts
+prisma-answer-comment-mapper.ts
+prisma-answer-attachment-mapper.ts
+prisma-question-attachment-mapper.ts
+
+no answer a gente ja copia do question porque ele é bem parecido
+substitui todos os question por qnswer. retira o plural do answer que vem do dominio porque ele esta salvo la sem o plural
+e agora vamos substituir as coisas que são diferentes
+retiramos o titulo e o bestAnswerID e o slug
+a gente tem que ir la no answer e pssar o updated at nas props como possivelmente nulo assim:
+export interface AnswerProps {
+  authorId: UniqueEntityId
+  questionId: UniqueEntityId
+  content: string
+  createdAt: Date
+  updatedAt?: Date | null
+  attachment: AnswerAttachmentList
+}
+
+e agra dicionamos na answer a questionId
+questionId: new UniqueEntityId(raw.questionId),
+e no toprisma a gente faz a mesma coisa tira os slug title e bestanswer e adiciona o question id
+tiramos as importações desnecessarias e a pagina fia assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Answer } from '@/domain/forum/enterprise/entities/answer'
+import { Answer as PrismaAnswer, Prisma } from '@prisma/client'
+
+export class PrismaAnswerMapper {
+  static toDomain(raw: PrismaAnswer): Answer {
+    return Answer.create(
+      {
+        content: raw.content,
+        questionId: new UniqueEntityId(raw.questionId),
+        authorId: new UniqueEntityId(raw.authorId),
+        createdAt: raw.createdAt,
+        updatedAt: raw.updatedAt,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(answer: Answer): Prisma.AnswerUncheckedCreateInput {
+    return {
+      id: answer.id.toString(),
+      authorId: answer.authorId.toString(),
+      questionId: answer.questionId.toString(),
+      content: answer.content,
+      createdAt: answer.createdAt,
+      updatedAt: answer.updatedAt,
+    }
+  }
+}
+
+
+copiamos ele e vamos para o qnswerCommentmapper subistituimos todos os answer por answerComment
+a gente tem que mudar essa importação porque no prisma é uma unica tabela chamada comment e a gente vai importar como prismacomment então fica assim
+import { Comment as PrismaComment, Prisma } from '@prisma/client'
+ena entidade o nome do arquivo tem um - antre o answer e o comment fica assim:
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+no static toprisma a gente tem que mudar tambem para commentUnchecked e colocar a maisucula entre o prisma e o Comment
+static toPrisma(
+    answerComment: AnswerComment,
+  ): Prisma.CommentUncheckedCreateInput {
+    return {
+
+  agora vamos para as colunas do banco de dados para ver.
+  a primeira coisa é que a nossa tabela no banco e dados é a comment e ela serve tanto para o answerComment quanto para o questionComment
+  então dentro do raw a gente tem o answer e o questionID
+  ambos são opcionais ou seja possivelmente nulos. porem se a gente estiver usando o prismaANSWER comment mapper o answer não pode ser nulo porque obviamente a gente vai estar lidando com uma answer
+  então o que a gente pode fazer é logo colocar um se o raw.answerId néao existir a gente da um erro. e nesse caso a gente ta colocando um trhow error porque é um erro não esperado.
+  export class PrismaAnswerCommentMapper {
+  static toDomain(raw: PrismaComment): AnswerComment {
+    if (!raw.answerId) {
+      throw new Error('Invalid comment type')
+    }
+    agora a gente ta no return para criar o answercomment colocado nossas informações
+    adicionamos o answerId e retiramos o questionID e dentro da entidade comment a gente coloca o null para o updatedAt
+    export interface CommentsProps {
+  authorId: UniqueEntityId
+  content: string
+  createdAt: Date
+  updatedAt?: Date | null
+}
+agora vomtamos para o mapper e vamos para o metodo toPRisma e agora a gente saber que a gente vai ter sempre o answerId porque se néao teria dado erro.
+entéao a gente substitui o questionId pelo answer id e a pagina toda fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+import { Comment as PrismaComment, Prisma } from '@prisma/client'
+
+export class PrismaAnswerCommentMapper {
+  static toDomain(raw: PrismaComment): AnswerComment {
+    if (!raw.answerId) {
+      throw new Error('Invalid comment type')
+    }
+    return AnswerComment.create(
+      {
+        content: raw.content,
+        authorId: new UniqueEntityId(raw.authorId),
+        answerId: new UniqueEntityId(raw.answerId),
+        createdAt: raw.createdAt,
+        updatedAt: raw.updatedAt,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    answerComment: AnswerComment,
+  ): Prisma.CommentUncheckedCreateInput {
+    return {
+      id: answerComment.id.toString(),
+      authorId: answerComment.authorId.toString(),
+      answerId: answerComment.answerId.toString(),
+      content: answerComment.content,
+      createdAt: answerComment.createdAt,
+      updatedAt: answerComment.updatedAt,
+    }
+  }
+}
+
+vamos agora para a questionCommentsmapper e colamos esse mapper da answerComments e substituimos todos os answer por question e ja ta pronto ele fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { QuestionComment } from '@/domain/forum/enterprise/entities/question-comment'
+import { Comment as PrismaComment, Prisma } from '@prisma/client'
+
+export class PrismaQuestionCommentMapper {
+  static toDomain(raw: PrismaComment): QuestionComment {
+    if (!raw.questionId) {
+      throw new Error('Invalid comment type')
+    }
+    return QuestionComment.create(
+      {
+        content: raw.content,
+        authorId: new UniqueEntityId(raw.authorId),
+        questionId: new UniqueEntityId(raw.questionId),
+        createdAt: raw.createdAt,
+        updatedAt: raw.updatedAt,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    questionComment: QuestionComment,
+  ): Prisma.CommentUncheckedCreateInput {
+    return {
+      id: questionComment.id.toString(),
+      authorId: questionComment.authorId.toString(),
+      questionId: questionComment.questionId.toString(),
+      content: questionComment.content,
+      createdAt: questionComment.createdAt,
+      updatedAt: questionComment.updatedAt,
+    }
+  }
+}
+
+copiamos ele e vamos para o questionattachments colamos no questionattachment selecionamos todo o lugar que esta escrito comment e substituimos por attachment
+porem no questionAttachlent a gente por enquanto vai deixar simples mas mais na frente a gente vai mecher mais. no attachment diferente do comentario a gente tem uma whatchedList a gente tem varias classes a classe do attachment e depois a question e answer attachmenent que são so para representar os relacionamentos do attachment com a pergunta ou resposta. então esse mapper que a gente ta fazendo agora ele vai ser so para essa classe do relacionamento a gente vai até tirar o metodo toPSrisma e deixar so o toDomain porque se a gente for no repositorio de attachmentsQuestion a gente não tem nenhum metodo para criar ou salvar a gente so tem de busca entéao a gente não tem metodo que precise que converta um atachment do dominio para a camada de persistencia porque a gente so tem os metodos de busca
+a gente mantem a nossa tratativa de erro para o caso de não ter o question id
+e cfriamos o questionAttachment passando apenas os dois id o attachment e o question id e do raw o attachmentId esta como simplismen,te id fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+import { Attachment as PrismaAttachment } from '@prisma/client'
+
+export class PrismaQuestionAttachmentMapper {
+  static toDomain(raw: PrismaAttachment): QuestionAttachment {
+    if (!raw.questionId) {
+      throw new Error('Invalid attachment type')
+    }
+    return QuestionAttachment.create(
+      {
+        attachmentId: new UniqueEntityId(raw.id),
+        questionId: new UniqueEntityId(raw.questionId),
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+}
+
+copiamos isso e coamos no answerAttachment mapper e substituimos os questions por answer fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { AnswerAttachment } from '@/domain/forum/enterprise/entities/answer-attachment'
+import { Attachment as PrismaAttachment } from '@prisma/client'
+
+export class PrismaAnswerAttachmentMapper {
+  static toDomain(raw: PrismaAttachment): AnswerAttachment {
+    if (!raw.answerId) {
+      throw new Error('Invalid attachment type')
+    }
+    return AnswerAttachment.create(
+      {
+        attachmentId: new UniqueEntityId(raw.id),
+        answerId: new UniqueEntityId(raw.answerId),
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+}
 
 
