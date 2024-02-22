@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { PrismaService } from './prisma.service'
-import { PrismaAnswerAttachmentRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswerAttachmentsRepository } from './repositories/prisma-answer-attachments-repository'
 import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
 import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
 import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
@@ -13,7 +13,7 @@ import { PrismaStudentsRepository } from './repositories/prisma-students-reposit
 @Module({
   providers: [
     PrismaService,
-    PrismaAnswerAttachmentRepository,
+    PrismaAnswerAttachmentsRepository,
     PrismaAnswersRepository,
     PrismaAnswerCommentsRepository,
     PrismaQuestionAttachmentsRepository,
@@ -23,7 +23,7 @@ import { PrismaStudentsRepository } from './repositories/prisma-students-reposit
   ],
   exports: [
     PrismaService,
-    PrismaAnswerAttachmentRepository,
+    PrismaAnswerAttachmentsRepository,
     PrismaAnswersRepository,
     PrismaAnswerCommentsRepository,
     PrismaQuestionAttachmentsRepository,

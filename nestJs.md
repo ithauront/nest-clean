@@ -6801,6 +6801,171 @@ export class PrismaAnswerAttachmentsRepository
 
 com isso todos os repositorios estão implementados.
 
+# controller buscar pergunta por slug
+não é realmente necessario ter um controller para cada caso de uso. as vezes podemos ter dois controllers chamando o mesmo caso de uso ou um controller que cama diversso casos de uso. mas aqui vamos fazer um controller para o buscar pergunta por slug
+vamos criar get-question-by-slug.controller.ts
+colamos nele o fetchrecentquestion controllers e tiramos todos os parametros no endereço a gente bota /question/:slug para ser um roadparam assim como a genre quer uma unica pergunra a gente coloca o slug da perguna que queremos buscar
+
+@Controller('/questions/:slug')
+
+e agoraa gente seleciona o listRecentQuestions e substitui por getQuestionBySlug e mudamos tambem o nome do controller
+a gente não tem parametro query mas tem roadParams entéo na minha que tem os query a gente vai substituir
+ao invez de @querry vamos usar o @param e a gente pega o slug no lugar do page
+
+  @Get()
+  async handle(@Param('slug') slug: string) {
+
+    agora no execute a gente passa o slug como parametro
+
+    se der left da o mesmo erro de badrequest e se não a gente retorna uma unica question usando o questionPresenterToHttp result value quetion
+    fica assim:
+    import { BadRequestException, Controller, Get, Param } from '@nestjs/common'
+import { QuestionPresenter } from '../presenters/question-presenter'
+import { GetQuestionBySlugUseCase } from '@/domain/forum/application/use-cases/get-question-by-slug'
+
+@Controller('/questions/:slug')
+export class GetQuestionBySlugController {
+  constructor(private getQuestionBySlug: GetQuestionBySlugUseCase) {}
+
+  @Get()
+  async handle(@Param('slug') slug: string) {
+    const result = await this.getQuestionBySlug.execute({
+      slug,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+
+    return { questions: QuestionPresenter.toHTTP(result.value.question) }
+  }
+}
+
+agora podemos fazer o teste get-question-by-slug.controller.e2e-spec.ts
+vamos copiar nele o teste do fetch
+mudamos o nome para get question by slug no describe e o nome do teste
+  test('[get]/questions/:slug', async () => {
+    o teste segue o mesmo padrão de criar um usuario e autenticar e na hora da pergunta como precisamos de uma so a gente pode mudar o metodo para create e passar uma so
+    e tambem a hora de buscar a pergunra a gente passa o slugda pergunta no endereço fica assim:
+      await prisma.question.create({
+      data: {
+        title: 'Question 01',
+        content: 'This is the question',
+        slug: 'question-01',
+        authorId: user.id,
+      },
+    })
+
+    const response = await request(app.getHttpServer())
+      .get('/questions/question-01')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+e a gente espera que o resultado seja 200 e que no body vai vir apenas uma unica pergunta e a gente pode usar o expect objetc containing title question01 fica assim o teste todo:
+import { AppModule } from '@/infra/app.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+
+describe('get question by slug - tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions/:slug', async () => {
+    const user = await prisma.user.create({
+      data: {
+        name: 'Jhon Doe',
+        email: 'jhon@doe.com',
+        password: await hash('123456', 8),
+      },
+    })
+
+    const accessToken = jwt.sign({ sub: user.id })
+
+    await prisma.question.create({
+      data: {
+        title: 'Question 01',
+        content: 'This is the question',
+        slug: 'question-01',
+        authorId: user.id,
+      },
+    })
+
+    const response = await request(app.getHttpServer())
+      .get('/questions/question-01')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      question: expect.objectContaining({ title: 'Question 01' }),
+    })
+  })
+})
+
+e agora vamos no http comule e vamos importar o novo controller e o caso de uso getquestionBy slug controller e useCase fica assim:
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+import { CryptographyModule } from '../cryptography/cryptography.module'
+import { GetQuestionBySlugController } from './controllers/get-question-by-slug.controller'
+import { GetQuestionBySlugUseCase } from '@/domain/forum/application/use-cases/get-question-by-slug'
+
+@Module({
+  imports: [DatabaseModule, CryptographyModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+    GetQuestionBySlugController,
+  ],
+  providers: [
+    CreateQuestionUseCase,
+    ListRecentQuestionsUseCase,
+    AutenticateStudentUseCase,
+    RegisterStudentUseCase,
+    GetQuestionBySlugUseCase,
+  ],
+})
+export class HttpModule {}
+
+e no caso de uso a gente coloca o injectable assim:
+
+@Injectable()
+export class GetQuestionBySlugUseCase {
+  constructor(private questionsRepository: QuestionsRepository) {}
+
+  async execute({
+
+agora a gente poderia criar no packageJson um pscript testE2E:watch para manter rodanto 
+   "test:e2e:watch": "vitest --config ./vitest.config.e2e.ts",
+
+   o legal do watch é que ele fica observando os tentes que são alterados e ai ele so roda de novo os que são alterados e não todos.
+   
 
 
 
