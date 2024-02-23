@@ -6966,6 +6966,275 @@ agora a gente poderia criar no packageJson um pscript testE2E:watch para manter 
 
    o legal do watch é que ele fica observando os tentes que são alterados e ai ele so roda de novo os que são alterados e não todos.
    
+  # factories 
+
+  como nos vamos fazer varios testes para os controles de agora em diante nos vamos ter que criar factories 
+  enas que a gente tem estamos criando entidades a nivel de camada de dominio e não de persistencia
+  então se a gente quisesse usar as factories nos nossos testes a gente teria que criar usando a factory e depois converter ela usando o mapper
+  para não ficar fazendo isso sempre a gente poderia ter uma função dentro do factory que ja fizesse isso na camada de persistencia tambem ou seja o factory poderia ser usado tanto para dominio quanto para persistencia
+  então vamos começar com o make student
+  porem para ter acesso ao banco de dados a gente precisa do prisma service. então a gente vai criar uma classe
+  e vamos exportar ela e usar o injectable nela
+  a gente vai ter o construtor nela para pegar o prisma e a gentevai criar um unco metodo nela
+  esse metodo vai receber um data que vai ser um objeto vazio e vai ter como tipo o partial student props como o outro metodo que vai para a entidade e ele vai devolver um Student da etidade fica assim
+  async makePrismaStudent(data: Partial<StudentProps> = {}): Promise<Student> {}
+
+  e la dentro da função a gente vai fazer uma const student para ser igual a utilização da função makestudent de cima desse proprio arquivo e depois no retorno a gente passa ela pelo mapper e salva ela no prisma
+  fica assim:
+  
+@Injectable()
+export class StudentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaStudent(data: Partial<StudentProps> = {}): Promise<Student> {
+    const student = makeStudent(data)
+
+    await this.prisma.user.create({
+      data: PrismaStudentsMapper.toPrisma(student),
+    })
+
+    return student
+  }
+}
+
+e a pagina toda fica assim
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import {
+  Student,
+  StudentProps,
+} from '@/domain/forum/enterprise/entities/student'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { PrismaStudentsMapper } from '@/infra/database/prisma/mappers/prisma-students-mapper'
+
+export function makeStudent(
+  override: Partial<StudentProps> = {},
+  id?: UniqueEntityId,
+) {
+  const student = Student.create(
+    {
+      name: faker.person.fullName(),
+      email: faker.internet.email(),
+      password: faker.internet.password(),
+      ...override,
+    },
+    id,
+  )
+
+  return student
+}
+
+@Injectable()
+export class StudentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaStudent(data: Partial<StudentProps> = {}): Promise<Student> {
+    const student = makeStudent(data)
+
+    await this.prisma.user.create({
+      data: PrismaStudentsMapper.toPrisma(student),
+    })
+
+    return student
+  }
+}
+
+
+e se a gente for para o teste de getQuestion by slug por exemplo onde a gente cria um student a gente tem la em cima o createTEstModule isso é um modulo que tem providers
+   const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile()
+
+    é so a gente passar o pra ele o privider e nele passar a classe que a gente criou
+     beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+      providers: [StudentFactory],
+    }).compile()
+
+    e agora a gente pode da mesma forma que pegamos o prisma ou o jwt pegar o factory usando o let e tambem depois a gente pega ele de dentro do contexto do modulo usando p moduleref.get
+    describe('get question by slug - tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+      providers: [StudentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+  e agora a gente pode usar a factory  no lugar de criar o usuario da forma que estamos cfriando.
+  aconst user vai ser apenas um await studentFactory.makeStudentPrisma
+    test('[get]/questions/:slug', async () => {
+    const user = await studentFactory.makePrismaStudent()
+    e agora essa const user vai ser um Student da camada de dominio então para pegar o id dele a gente tem que passar o toString
+        const accessToken = jwt.sign({ sub: user.id.toString() })
+         await prisma.question.create({
+      data: {
+        title: 'Question 01',
+        content: 'This is the question',
+        slug: 'question-01',
+        authorId: user.id.toString(),
+      },
+    })
+
+    porem se a gente tentar rodar os testes vai falhar porque o prismaService néao faz parte do roottestModule
+
+esse erro acontece porque o studentFactory depende do prismaService mas p prismaService não esta presente nesse module. se a gente olhar no teste a gente importa o appmodule que importa o httpmodule o httpmodule importa o databaseModule e esse databasemodule possui o prismaservice.
+so que esse prisma service aqui esta sendo exportado somente para o httpmodule ou seja para o module imediatamente acima dele
+e não para os outros
+então se a gente quer usar o prisma tambem no nosso teste a gente precisa nos imports importar tambem o databasemodule
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory],
+    }).compile()
+
+    e se a gente colocar isso e rodar o teste ai sim ele vai passar.
+    agora vamos fazer parecido com o makeQuestion a gente copia essa parte do makestudent
+    @Injectable()
+export class StudentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaStudent(data: Partial<StudentProps> = {}): Promise<Student> {
+    const student = makeStudent(data)
+
+    await this.prisma.user.create({
+      data: PrismaStudentsMapper.toPrisma(student),
+    })
+
+    return student
+  }
+}
+
+
+vamos no makequestion e colamos isso e substituimos o student por question fazemos as importações e substituimos o user por question fica assim:
+
+import {
+  QuestionProps,
+  Questions,
+} from '@/domain/forum/enterprise/entities/questions'
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { PrismaQuestionMapper } from '@/infra/database/prisma/mappers/prisma-question-mapper'
+
+export function makeQuestion(
+  override: Partial<QuestionProps> = {},
+  id?: UniqueEntityId,
+) {
+  const question = Questions.create(
+    {
+      title: faker.lorem.sentence(),
+      authorId: new UniqueEntityId(),
+      content: faker.lorem.text(),
+      ...override,
+    },
+    id,
+  )
+
+  return question
+}
+
+@Injectable()
+export class QuestionFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaQuestion(
+    data: Partial<QuestionProps> = {},
+  ): Promise<Questions> {
+    const question = makeQuestion(data)
+
+    await this.prisma.question.create({
+      data: PrismaQuestionMapper.toPrisma(question),
+    })
+
+    return question
+  }
+}
+
+agora voltamos la no nosso teste e trazemos tambem o makeuqestion da mesma forma que a gente trouxe o make student e ai a gente faz a question usando esse metodo
+   await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+passamos o author id porque as questions precisam ser acossiadas a um author
+e o slug a gente passa de uma maneira fixa tambem para poder ter acesso a ele nos parametros de session e tambem passamos o title porque nos vamos esperar esse titlo no nosso expect
+ await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+      slug: Slug.create('question-01'),
+      title: 'Question 01',
+    })
+
+    a pagina fica assim e se a gente rodar os testes tudo deve funcionar:
+    import { Slug } from '@/domain/forum/enterprise/entities/value-objects/slug'
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('get question by slug - tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions/:slug', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+      slug: Slug.create('question-01'),
+      title: 'Question 01',
+    })
+
+    const response = await request(app.getHttpServer())
+      .get('/questions/question-01')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      questions: expect.objectContaining({ title: 'Question 01' }),
+    })
+  })
+})
+
+
 
 
 
