@@ -7234,6 +7234,360 @@ describe('get question by slug - tests (e2e)', () => {
   })
 })
 
+## refatorando testes e2e
+
+agora que a gente vai fazer esse tipo de factory 
+vamos no fetch recent question test e nele a gente faz criação de user e question entéoa com as factories que a gente tem da pra fazer a refatoração
+no cabeçalho a gente faz igul nos outros codigos e para fazer o user tambem para fazer varias questions a gente pode usar o Promisse.all e fazer assim:
+e passamos um titulo diferente para cada uma
+
+    await Promise.all([
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 01',
+      }),
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 02',
+      }),
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 03',
+      }),
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 04',
+      }),
+    ])
+
+    com isso o codigo ja funciona e podemos remover tambem as mensoes ao prisma dos testes tanto do fetch quando do get by slug então a pagina completa do fetch fica assim:
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Fetch recent questions -tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    await Promise.all([
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 01',
+      }),
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 02',
+      }),
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 03',
+      }),
+      questionFactory.makePrismaQuestion({
+        authorId: user.id,
+        title: 'Question 04',
+      }),
+    ])
+
+    const response = await request(app.getHttpServer())
+      .get('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      questions: [
+        expect.objectContaining({ title: 'Question 01' }),
+        expect.objectContaining({ title: 'Question 02' }),
+        expect.objectContaining({ title: 'Question 03' }),
+        expect.objectContaining({ title: 'Question 04' }),
+      ],
+    })
+  })
+})
+
+vamos agora fazer o mesmo no createquestion controller test
+e fazemos igual nesse a gente so precisa do student então fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Create questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/questions', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id })
+
+    const response = await request(app.getHttpServer())
+      .post('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Question',
+        content: 'This is the question',
+      })
+
+    expect(response.statusCode).toBe(201)
+
+    const QuestionOnDatabase = prisma.question.findFirst({
+      where: {
+        title: 'Question',
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeTruthy()
+  })
+})
+
+e o crete account não precisa de factory então vamos para o autenicate
+nele a gente cria o student usando o factory mas passamos o email e o password usando o hash assim:
+  await studentFactory.makePrismaStudent({
+      email: 'jhon@doe.com',
+      password: await hash('123456', 8),
+    })
+
+ele fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import { hash } from 'bcryptjs'
+import request from 'supertest'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Autenticate tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    studentFactory = moduleRef.get(StudentFactory)
+
+    await app.init()
+  })
+
+  test('[POST]/sessions', async () => {
+    await studentFactory.makePrismaStudent({
+      email: 'jhon@doe.com',
+      password: await hash('123456', 8),
+    })
+
+    const response = await request(app.getHttpServer()).post('/sessions').send({
+      email: 'jhon@doe.com',
+      password: '123456',
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.body).toEqual({
+      access_token: expect.any(String),
+    })
+  })
+})
+
+com isso refatoramos todos os testes autentication createquestion fetch recent question e getquestionby slug . agora a gente pode criar mais factories
+vamos no makequestion e copiamos aquela parte da classe e vamos para o makeAnser
+fica asim:
+import { AnswerProps, Answer } from '@/domain/forum/enterprise/entities/answer'
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { PrismaAnswerMapper } from '@/infra/database/prisma/mappers/prisma-answer-mapper'
+
+export function makeAnswer(
+  override: Partial<AnswerProps> = {},
+  id?: UniqueEntityId,
+) {
+  const answer = Answer.create(
+    {
+      questionId: new UniqueEntityId(),
+      authorId: new UniqueEntityId(),
+      content: faker.lorem.text(),
+      ...override,
+    },
+    id,
+  )
+
+  return answer
+}
+
+@Injectable()
+export class AnswerFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaAnswer(data: Partial<AnswerProps> = {}): Promise<Answer> {
+    const answer = makeAnswer(data)
+
+    await this.prisma.answer.create({
+      data: PrismaAnswerMapper.toPrisma(answer),
+    })
+
+    return answer
+  }
+}
+
+ja alterando os question pelos answer mas com cuidado por conda do questionId que precisa se manter question id na função anterior
+
+agora vamos de novo copiar essa classe do answerFactory colamos no questionComment e todo lugar que esta escrito answer a gnte troca por questionComment
+e toma cuidado que no prisma. é so comment e não questionComment
+fica assim:
+import {
+  QuestionComment,
+  QuestionCommentsProps,
+} from '@/domain/forum/enterprise/entities/question-comment'
+
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { PrismaQuestionCommentMapper } from '@/infra/database/prisma/mappers/prisma-question-comment-mapper'
+
+export function makeQuestionComment(
+  override: Partial<QuestionCommentsProps> = {},
+  id?: UniqueEntityId,
+) {
+  const questionComment = QuestionComment.create(
+    {
+      questionId: new UniqueEntityId(),
+
+      authorId: new UniqueEntityId(),
+      content: faker.lorem.text(),
+      ...override,
+    },
+    id,
+  )
+
+  return questionComment
+}
+
+@Injectable()
+export class QuestionCommentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaQuestionComment(
+    data: Partial<QuestionCommentsProps> = {},
+  ): Promise<QuestionComment> {
+    const questionComment = makeQuestionComment(data)
+
+    await this.prisma.comment.create({
+      data: PrismaQuestionCommentMapper.toPrisma(questionComment),
+    })
+
+    return questionComment
+  }
+}
+copiamos isso e vamos no answercomment fica assim:
+import {
+  AnswerComment,
+  AnswerCommentsProps,
+} from '@/domain/forum/enterprise/entities/answer-comment'
+
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { PrismaAnswerCommentMapper } from '@/infra/database/prisma/mappers/prisma-answer-comment-mapper'
+
+export function makeAnswerComment(
+  override: Partial<AnswerCommentsProps> = {},
+  id?: UniqueEntityId,
+) {
+  const answerComment = AnswerComment.create(
+    {
+      answerId: new UniqueEntityId(),
+
+      authorId: new UniqueEntityId(),
+      content: faker.lorem.text(),
+      ...override,
+    },
+    id,
+  )
+
+  return answerComment
+}
+
+@Injectable()
+export class AnswerCommentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaAnswerComment(
+    data: Partial<AnswerCommentsProps> = {},
+  ): Promise<AnswerComment> {
+    const answerComment = makeAnswerComment(data)
+
+    await this.prisma.comment.create({
+      data: PrismaAnswerCommentMapper.toPrisma(answerComment),
+    })
+
+    return answerComment
+  }
+}
+
+com isso a gente finaliza essa parte e agora vamos criar os demais controllers da aplicação.
+
+
+
+
+
+
 
 
 

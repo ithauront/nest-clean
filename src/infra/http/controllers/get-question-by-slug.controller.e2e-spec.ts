@@ -11,7 +11,6 @@ import { StudentFactory } from 'test/factories/make-student'
 
 describe('get question by slug - tests (e2e)', () => {
   let app: INestApplication
-  let prisma: PrismaService
   let studentFactory: StudentFactory
   let questionFactory: QuestionFactory
   let jwt: JwtService
@@ -25,7 +24,6 @@ describe('get question by slug - tests (e2e)', () => {
     app = moduleRef.createNestApplication()
     studentFactory = moduleRef.get(StudentFactory)
     questionFactory = moduleRef.get(QuestionFactory)
-    prisma = moduleRef.get(PrismaService)
     jwt = moduleRef.get(JwtService)
 
     await app.init()
