@@ -7583,6 +7583,328 @@ export class AnswerCommentFactory {
 
 com isso a gente finaliza essa parte e agora vamos criar os demais controllers da aplicação.
 
+# controller editar pergunta
+
+vamos criar o arquivo edit-question-controller.ts e tambem o de teste dele com .e2e-spec.ts
+colamos nele o controller de createquestion e substituimos o create por edit
+mudamos a rota para pegar o id question/:id
+trocamos de post para put mudamos o httpcode para 204
+ @HttpCode(204)
+ porque como não retornamos nenhuma respsota é melhor usar 204 do que 200
+ pegamos o parametro id e camamos ele de questionID   async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: EditQuestionBodySchema,
+    @Param('id') questionId: string,
+    passamos o id para o result na chamada do caso de uso
+     const result = await this.createQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: [],
+      questionId,
+    })
+     e pronto fica assim:
+     import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpCode,
+  Param,
+  Put,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { EditQuestionUseCase } from '@/domain/forum/application/use-cases/edit-question'
+
+const editQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(editQuestionBodySchema)
+
+type EditQuestionBodySchema = z.infer<typeof editQuestionBodySchema>
+
+@Controller('/questions/:id')
+export class EditQuestionController {
+  constructor(private editQuestion: EditQuestionUseCase) {}
+
+  @Put()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: EditQuestionBodySchema,
+    @Param('id') questionId: string,
+  ) {
+    const { title, content } = body
+    const userId = user.sub
+
+    const result = await this.editQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: [],
+      questionId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+agora vamos  n http module e importamos o controller e o caso de uso
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication-controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+import { CryptographyModule } from '../cryptography/cryptography.module'
+import { GetQuestionBySlugController } from './controllers/get-question-by-slug.controller'
+import { GetQuestionBySlugUseCase } from '@/domain/forum/application/use-cases/get-question-by-slug'
+import { EditQuestionController } from './controllers/edit-question-controller'
+import { EditAnswerUseCase } from '@/domain/forum/application/use-cases/edit-answer'
+
+@Module({
+  imports: [DatabaseModule, CryptographyModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+    GetQuestionBySlugController,
+    EditQuestionController,
+  ],
+  providers: [
+    CreateQuestionUseCase,
+    ListRecentQuestionsUseCase,
+    AutenticateStudentUseCase,
+    RegisterStudentUseCase,
+    GetQuestionBySlugUseCase,
+    EditAnswerUseCase,
+  ],
+})
+export class HttpModule {}
+
+e vamos la no caso de uso colocar o injectable
+
+@Injectable()
+export class EditQuestionUseCase {
+  constructor(
+    private questionsRepository: QuestionsRepository,
+    private questionAttachmentRepository: QuestionAttachmentsRepository,
+  ) {}
+
+  e agora vamos em todos os repositorios e trocamos as interfaces por classes abstratas pelo mesmo motivo que a gente fez um pouco antes
+  import { AnswerAttachment } from '../../enterprise/entities/answer-attachment'
+
+export abstract class AnswerAttachmentsRepository {
+  abstract findManyByAnswerId(answerId: string): Promise<AnswerAttachment[]>
+  abstract deleteManyByAnswerId(answerId: string): Promise<void>
+}
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerComment } from '../../enterprise/entities/answer-comment'
+
+export abstract class AnswerCommentsRepository {
+  abstract findById(id: string): Promise<AnswerComment | null>
+  abstract findManyByAnswerId(
+    answerId: string,
+    params: PaginationParams,
+  ): Promise<AnswerComment[]>
+
+  abstract create(answerComment: AnswerComment): Promise<void>
+  abstract delete(answerComment: AnswerComment): Promise<void>
+}
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { Answer } from '../../enterprise/entities/answer'
+
+export abstract class AnswersRepository {
+  abstract findById(id: string): Promise<Answer | null>
+  abstract findManyByQuestionId(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<Answer[]>
+
+  abstract create(answer: Answer): Promise<void>
+  abstract delete(answer: Answer): Promise<void>
+  abstract save(answer: Answer): Promise<void>
+}
+
+import { QuestionAttachment } from '../../enterprise/entities/question-attachment'
+
+export abstract class QuestionAttachmentsRepository {
+  abstract findManyByQuestionId(
+    questionId: string,
+  ): Promise<QuestionAttachment[]>
+
+  abstract deleteManyByQuestionId(questionId: string): Promise<void>
+}
+
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionComment } from '../../enterprise/entities/question-comment'
+
+export abstract class QuestionCommentsRepository {
+  abstract findById(id: string): Promise<QuestionComment | null>
+  abstract findManyByQuestionId(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<QuestionComment[]>
+
+  abstract create(questionComment: QuestionComment): Promise<void>
+  abstract delete(questionComment: QuestionComment): Promise<void>
+}
+
+
+pronto todos agora estão feitos lembrando ue esses repositorios estão na caada de dominio
+agora no database module a gente tinha feito o provide e useClass para quando um repositorio precisar de um contrato a gente usar a classe que a gente designa. vamos faaeer isso tambem para os demais repositorios então vamos no database module e nos exports a gente tira o prisma da frente do repositorios a pagina fica assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentsRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { PrismaStudentsRepository } from './repositories/prisma-students-repository'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+
+@Module({
+  providers: [
+    PrismaService,
+   { provide: AnswerAttachmentsRepository,
+    useClass: PrismaAnswerAttachmentsRepository,}
+   { provide:AnswersRepository ,
+    useClass: PrismaAnswersRepository,}
+   { provide:AnswerCommentsRepository ,
+    useClass: PrismaAnswerCommentsRepository,}
+   { provide:QuestionAttachmentsRepository,
+    useClass: PrismaQuestionAttachmentsRepository,}
+   { provide:QuestionCommentsRepository,
+    useClass: PrismaQuestionCommentsRepository, },
+    { provide: QuestionsRepository, useClass: PrismaQuestionsRepository },
+    { provide: StudentsRepository, useClass: PrismaStudentsRepository },
+  ],
+  exports: [
+    PrismaService,
+    AnswerAttachmentsRepository,
+    AnswersRepository,
+    AnswerCommentsRepository,
+    QuestionAttachmentsRepository,
+    QuestionCommentsRepository,
+    QuestionsRepository,
+    StudentsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+
+agora vamos criar o teste vamos copiar o teste do create question
+a gente cria a pergunta ega o id dessa pergunta, muda para put e passa o id da pergunta. e editamos ela para new title e new content
+fica assim:
+
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Edit questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[Put]/questions/:id', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .put(`/questions/${questionId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'New Title',
+        content: 'New Content',
+      })
+
+    expect(response.statusCode).toBe(204)
+
+    const QuestionOnDatabase = prisma.question.findFirst({
+      where: {
+        title: 'New Title',
+        content: 'New Content',
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeTruthy()
+  })
+})
+
+
+porem tem um erro no teste de fetch que a gente cria as questions com promisse all e as vezes ele cria forta da ordem e no nosso expect a gente esta esperando que venha em uma ordem especifica então vamos mudar o nosso expect que estava assim:
+   expect(response.body).toEqual({
+      questions: [
+        expect.objectContaining({ title: 'Question 01' }),
+        expect.objectContaining({ title: 'Question 02' }),
+        expect.objectContaining({ title: 'Question 03' }),
+        expect.objectContaining({ title: 'Question 04' }),
+      ],
+    })
+
+    para ao invez de eseprar um array assim qe ee vai na ordem a gent" pode fazer um expect array containing qiue ai ele vai validar se o array tem essas coisas independente da ordem assim:
+        expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      questions: expect.arrayContaining([
+        expect.objectContaining({ title: 'Question 01' }),
+        expect.objectContaining({ title: 'Question 02' }),
+        expect.objectContaining({ title: 'Question 03' }),
+        expect.objectContaining({ title: 'Question 04' }),
+      ]),
+    })
+  })
+})
+
+
 
 
 
