@@ -7905,7 +7905,9 @@ porem tem um erro no teste de fetch que a gente cria as questions com promisse a
 })
 
 
-
+no create question test tem um erro. o userId tem que colocar toString(
+  
+)
 
 
 
