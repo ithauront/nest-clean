@@ -7964,10 +7964,260 @@ então a gente da um findUnique e passa o id que é o id que a gente usou nos pa
     })
 
     e ai a gente quer que ele não esteja então a gente exppect o questionOnDatabase to be null
+p teste fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Delete questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[DELETE]/questions/:id', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .delete(`/questions/${questionId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({})
+
+    expect(response.statusCode).toBe(204)
+
+    const QuestionOnDatabase = prisma.question.findUnique({
+      where: {
+        id: questionId,
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeNull()
+  })
+})
 
     agora temos que ir no httpmodule e cadastrar o controller.
     a gente vai e colocar o deletequestioncontroller na arte de controllers e o deletequestionUseCase na parte de providers e vamos la no arquivo do useCase e colocamos ele como @Injectable()
-    
+
+## answer question controller
+
+agora vamos para o controller de responder uma pergunta 
+vamos criar o qrauivo answer-question.controller.ts
+copiamos nele o create question que é mais proximo do que vamos fazer
+e a rota dele vai ser /questions/:questionId/answers
+@Controller('/questions/:questionId/answers')
+isso porque toda resposta vai ser a resposta de uma pergunta então é legal a pergunta estar na url a gente usa o questionId e não so Id porque temos um recurso encadeado o id não vai ser da resposta e a informação principal nesse caso é a reposta então se a gente colocasse so Id a gente poderia pensar que é o id da resposta mas na verdade é o id da pergunta então é melhor expeficiar que é o questionId
+a gente pode mais pra frente ter o id assim quando formos tratar de pegar o id da resposta /questions/:questionId/answers/id
+mas podemos tambem padronizar para sempre usar id com prefixo para ficar bem claro de qual id a gente esta tratando.
+que é o questionId e a gente vai deixar esse nome e fazer ele ser uma string
+ async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('questionId') questionId: string
+
+    o body a gente vai validar apenas com o content pq ele não precisa de titulo e todo os lugares que tem create question a gente vai trocar para answerQuestion e ajustamos a impotação do caso de uso
+    a gente passa o questionId dentro da execute
+    e o authorId esta dando erro porque la no useCase a gente esta recebendo como instructorId mas a gente vai mudar sso para authorId porque se parar para pensar um aluno tambem pode resposnder a pergunta de outro aluno e a gente aproveita e coloca logo o injectable nesse useCase ele fica assim:
+    import { Either, right } from '@/core/either'
+import { Answer } from '../../enterprise/entities/answer'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { AnswersRepository } from '../repositories/answers-repository'
+import { AnswerAttachment } from '../../enterprise/entities/answer-attachment'
+import { AnswerAttachmentList } from '../../enterprise/entities/answer-attachment-list'
+import { Injectable } from '@nestjs/common'
+
+interface AnswerQuestionUseCaseRequest {
+  authorId: string
+  questionId: string
+  content: string
+  attachmentIds: string[]
+}
+type AnswerQuestionUseCaseResponse = Either<
+  null,
+  {
+    answer: Answer
+  }
+>
+@Injectable()
+export class AnswerQuestionUseCase {
+  constructor(private anwsersRepository: AnswersRepository) {}
+
+  async execute({
+    authorId,
+    questionId,
+    content,
+    attachmentIds,
+  }: AnswerQuestionUseCaseRequest): Promise<AnswerQuestionUseCaseResponse> {
+    const answer = Answer.create({
+      content,
+      authorId: new UniqueEntityId(authorId),
+      questionId: new UniqueEntityId(questionId),
+    })
+    const attachment = attachmentIds.map((attachmentId) => {
+      return AnswerAttachment.create({
+        attachmentId: new UniqueEntityId(attachmentId),
+        answerId: answer.id,
+      })
+    })
+
+    answer.attachment = new AnswerAttachmentList(attachment)
+    await this.anwsersRepository.create(answer)
+    return right({ answer })
+  }
+}
+
+voltamos para o controller
+com isso o nosso controller fica bom ele fica assim:
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { AnswerQuestionUseCase } from '@/domain/forum/application/use-cases/answer-question'
+
+const answerQuestionBodySchema = z.object({
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(answerQuestionBodySchema)
+
+type AnswerQuestionBodySchema = z.infer<typeof answerQuestionBodySchema>
+
+@Controller('/questions/:questionId/answers')
+export class AnswerQuestionController {
+  constructor(private answerQuestion: AnswerQuestionUseCase) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('questionId') questionId: string,
+    @Body(bodyValidationPipe) body: AnswerQuestionBodySchema,
+  ) {
+    const { content } = body
+    const userId = user.sub
+
+    const result = await this.answerQuestion.execute({
+      questionId,
+      content,
+      authorId: userId,
+      attachmentIds: [],
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+
+podemos agora ir para a parte de teste
+answer-question.controller.e2e-spec.ts
+para o teste a gente vai copiar o editquestion
+vamos muar o describe para answer question test
+e o nome do teste fica sendo esse
+
+  test('[POST]/questions/:questionId/answers', async () => {
+    ai a gente cria um strudent e uma question e na parte da const response a gente troca para post e coloca o endereço correto pegando o questionId e depois a /ansers e enviamos apenas o conteudo new answer e esperamos um status 201
+    e agora a gente vai procurar no database uma answer com esse conteudo que a gente criou de new answer e verificar se ela é truthy
+    fica assim:
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Answer questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/questions/:questionId/answers', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .post(`/questions/${questionId}/answers`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New Answer',
+      })
+
+    expect(response.statusCode).toBe(201)
+
+    const answerOnDatabase = prisma.question.findFirst({
+      where: {
+        content: 'New Content',
+      },
+    })
+
+    expect(answerOnDatabase).toBeTruthy()
+  })
+})
+ 
+ agora vamos no http module e adicionamos esse controller e o useCase.
+ 
+  
 
 
 
