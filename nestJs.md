@@ -7905,9 +7905,71 @@ porem tem um erro no teste de fetch que a gente cria as questions com promisse a
 })
 
 
-no create question test tem um erro. o userId tem que colocar toString(
-  
-)
+no create question test tem um erro. o userId tem que colocar toString()
+
+## delete question controller
+vamos criar o controller de delete-question.controller.ts e tambem o seu teste. lembrando que entre o nome e a palavra controller é separado com . verificar todos se estão assim.
+nos vamos copiar e colar nele o edit question e vamos delear a parte de body e validação dele o decorator tem que ser delete o http code pode ser 204
+a url continua sendo :id selecionamos todos os edit e trocamos por delete
+e para deletar a qustion a gente precisa do do questionId e do author ID
+o controller fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Delete,
+  HttpCode,
+  Param,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { DeleteQuestionUseCase } from '@/domain/forum/application/use-cases/delete-question'
+
+@Controller('/questions/:id')
+export class DeleteQuestionController {
+  constructor(private deleteQuestion: DeleteQuestionUseCase) {}
+
+  @Delete()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('id') questionId: string,
+  ) {
+    const userId = user.sub
+
+    const result = await this.deleteQuestion.execute({
+      authorId: userId,
+      questionId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+
+agora vamos para o teste
+a gente copia o teste do edit e cola nele.
+a gente deixa a parte de criar usuario e a question porem em baixo a gente chama o metodo delete e passa para ele o questionId e o authorID pelos params de autentificação com o userToken o nosso controller vai ter acesso ao author Id e com o params id a question Id
+ const response = await request(app.getHttpServer())
+      .delete(`/questions/${questionId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({})
+
+e agora o codigo é 204 e quesremos validar que a pergunta nãoesta mais no banco de dados
+então a gente da um findUnique e passa o id que é o id que a gente usou nos params para deletar
+ const QuestionOnDatabase = prisma.question.findUnique({
+      where: {
+        id: questionId,
+      },
+    })
+
+    e ai a gente quer que ele não esteja então a gente exppect o questionOnDatabase to be null
+
+    agora temos que ir no httpmodule e cadastrar o controller.
+    a gente vai e colocar o deletequestioncontroller na arte de controllers e o deletequestionUseCase na parte de providers e vamos la no arquivo do useCase e colocamos ele como @Injectable()
+    
+
+
 
 
 
