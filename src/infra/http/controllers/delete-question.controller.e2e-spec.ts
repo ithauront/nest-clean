@@ -48,7 +48,7 @@ describe('Delete questions tests (e2e)', () => {
 
     expect(response.statusCode).toBe(204)
 
-    const QuestionOnDatabase = prisma.question.findUnique({
+    const QuestionOnDatabase = await prisma.question.findUnique({
       where: {
         id: questionId,
       },

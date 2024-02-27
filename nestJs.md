@@ -8382,7 +8382,7 @@ describe('Edit answer tests (e2e)', () => {
 
     expect(response.statusCode).toBe(204)
 
-    const answerOnDatabase = prisma.question.findFirst({
+    const answerOnDatabase = prisma.answer.findFirst({
       where: {
         content: 'New edited Answer',
       },
@@ -8504,6 +8504,343 @@ describe('Delete answer tests (e2e)', () => {
 })
 
 agora novamente httpmodues adicionar o useCase e o controller e colocar o injectable no useCase
+
+# listar resposta de perguntas
+vamos fazer o arquivo fetch-question-answers.controller.ts
+por enquanto a gente vai deixar o controller previamente criado mas no futuro vão ter alterações a fazer nele.
+vamos colar nele o fetch-recent-question.ts
+nos precisamos tambem pegar o id das perguntas então o nedereço é esse
+@Controller('/questions/:questionId/answers')
+vamos substituir todos os fetchRecentQuestion por fetchquestionAnswers e igual com o list para listQuestionsAnswers
+pegamos o questionId pelo @Param
+ async handle(
+    @Query('page', queryValidationPipe) page: PageParamsTypeSchema,
+    @Param('questionId') questionId: string,
+  ) {
+    const result = await this.listRecentQuestions.execute({
+      page,
+      questionId,
+    })
+
+    e embaixo eu pego a lista de answers e por enquanto a gente vai restronar as answer do jeito que elas estéao vidno do banco de dados. o que não é o ideial porque o ideial é ter presenter. porem esse presenter vai ter que ser um pouco mais detalhado nos queremos que na frente venha informaçãos como o author da resposta entéao a gente vai criar um presenter ainda sem ser o que ele vai ser no futuro. copiamos o presenter das questions e fazemos o arquivo answersPresenter substituimos question por answer e ajustamos a importação
+    e ela vai ter id, conteudo e a data de criação e data de update
+    por enquanto ela fica assim
+    import { Answer } from '@/domain/forum/enterprise/entities/answer'
+
+export class AnswerPresenter {
+  static toHTTP(answer: Answer) {
+    return {
+      id: answer.id.toString(),
+      content: answer.content,
+      createdAt: answer.createdAt,
+      updatedAt: answer.updatedAt,
+    }
+  }
+}
+
+
+agora no teste a gente vai copiar o fetchRecent question e colar no teste de questionAnswer vamos precisar da answerFactory e o nome do teste é a rota assim:
+
+  test('[get]/questions/:questionId/answers', async ()
+
+  a gente então cria o usuario e a question e depois a answer vamos criar uma so question
+  e a gente faz um promisse all depois para criar varias answers para a mesma pergunta assim:
+  
+    await Promise.all([
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 01',
+      }),
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 02',
+      }),
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 03',
+      }),
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 04',
+      }),
+    ])
+    o autor da resposta vai ser sempre o mesmo e tabem o mesmo da pergunta mas não tem problema
+    agora no nosso response a gente vai colocar o endereço certo e agora a gente espera que o code seja 200 e que seja um array com os objetos com o content e que seja um array answers de answer e numero fica assim a pagina
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Fetch questions answer tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions/:questionId/answers', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    await Promise.all([
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 01',
+      }),
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 02',
+      }),
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 03',
+      }),
+      answerFactory.makePrismaAnswer({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Answer 04',
+      }),
+    ])
+
+    const response = await request(app.getHttpServer())
+      .get(`/questions/${questionId}/answers`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      answers: expect.arrayContaining([
+        expect.objectContaining({ content: 'Answer 01' }),
+        expect.objectContaining({ content: 'Answer 02' }),
+        expect.objectContaining({ content: 'Answer 03' }),
+        expect.objectContaining({ content: 'Answer 04' }),
+      ]),
+    })
+  })
+})
+
+voltamos agora para o controller para usar o presenter que a gente criou.
+fica a pagina toda assim:
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Query,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListQuestionsAnswersUseCase } from '@/domain/forum/application/use-cases/list-question-answers'
+import { AnswerPresenter } from '../presenters/answer-presenter'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/questions/:questionId/answers')
+export class FetchQuestionAnswerController {
+  constructor(private listRecentQuestions: ListQuestionsAnswersUseCase) {}
+
+  @Get()
+  async handle(
+    @Query('page', queryValidationPipe) page: PageParamsTypeSchema,
+    @Param('questionId') questionId: string,
+  ) {
+    const result = await this.listRecentQuestions.execute({
+      page,
+      questionId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+    const answers = result.value.answers
+
+    return { answers: answers.map(AnswerPresenter.toHTTP) }
+  }
+}
+
+agora vamos no httpmodume e colocamos o controller o useCase e no useCase a gente coloca o injectable
+mais para frente vamos atualizar os presenters e as listagens para trazer tambem dados de relaxionamento mas por enquanto é isso.
+
+# controller escolher melhor resposta
+choose-question-best-answer.ts
+vamos colar nele o editquestion
+podemos ja tirar todo o body e sua validação
+e ai pegamos todos os editQeustion e substituimos por chooseBestQuestionAnswer e ajustamos a importação
+tiramos o title o content e o attachment
+e agora para pegar o id a gente não precisa da question so precisamos da resposta porque toda resposta ja tem o questionId então se a gente tiver acesso a resposta a gente tem acesso a pergunta e a gente faz assim la no nosso useCase que pega atravez da answerId ele descobre a answer e dai a question.
+então a nossa rota vai ficar pegando o answerId e depois por exemplo choose-as-best fica assim
+@Controller('/answers/:answerId/choose-as-best')
+nesse caso a gente vai usar o patch como metodo, que é um metodo para atualizar uma info mais especifica
+e para atualizar a gente precisa enviar o answerId fica assim:
+import {
+  BadRequestException,
+  Controller,
+  HttpCode,
+  Param,
+  Patch,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ChooseQuestionBestAnswerUseCase } from '@/domain/forum/application/use-cases/choose-question-best-answer'
+
+@Controller('/answers/:answerId/choose-as-best')
+export class ChooseQuestionBestAnswerController {
+  constructor(
+    private chooseQuestionBestAnswer: ChooseQuestionBestAnswerUseCase,
+  ) {}
+
+  @Patch()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('answerId') answerId: string,
+  ) {
+    const userId = user.sub
+
+    const result = await this.chooseQuestionBestAnswer.execute({
+      authorId: userId,
+      answerId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+agora para nosso teste a gente vai na editanswer e copia para colar nele
+mudamo o nome no describe e o nome do teste que é a rota
+
+  test('[PATCH]/answers/:answerId/choose-as-best', a
+  a gente cria o user a question e a answer e  na response a getne troca para patch e luda o endereço e tambem retira o conteudo fica assim:
+     const response = await request(app.getHttpServer())
+      .patch(`/answers/${answerId}/choose-as-best`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+e para vamidar o condigo é 204 e vamos pegar o question on databease e vamos buscar a question onde o id foi o que a gente criou 
+
+    const questionOnDatabase = prisma.question.findUnique({
+      where: {
+        id: question.id.toString(),
+      },
+    })
+
+    e agora a gente quer validar que nessa quesrtionOnDAtabase o bestAnswerId seja igual ao answerId oteste fica assim:
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Choose best question answer tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[PATCH]/answers/:answerId/choose-as-best', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const answer = await answerFactory.makePrismaAnswer({
+      questionId: question.id,
+      authorId: user.id,
+    })
+
+    const answerId = answer.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .patch(`/answers/${answerId}/choose-as-best`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(204)
+
+    const questionOnDatabase = await prisma.question.findUnique({
+      where: {
+        id: question.id.toString(),
+      },
+    })
+
+    expect(questionOnDatabase?.bestAnswerId).toEqual(answerId)
+  })
+})
+ e agora vamos no httpmodules e no useCase para passar as dependencias e o injectabel
+
+ 
+
+
+
 
   
 

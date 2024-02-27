@@ -50,7 +50,7 @@ describe('Answer questions tests (e2e)', () => {
 
     expect(response.statusCode).toBe(201)
 
-    const answerOnDatabase = prisma.question.findFirst({
+    const answerOnDatabase = await prisma.question.findFirst({
       where: {
         content: 'New Content',
       },

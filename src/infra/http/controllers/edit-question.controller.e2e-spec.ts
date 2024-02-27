@@ -51,7 +51,7 @@ describe('Edit questions tests (e2e)', () => {
 
     expect(response.statusCode).toBe(204)
 
-    const QuestionOnDatabase = prisma.question.findFirst({
+    const QuestionOnDatabase = await prisma.question.findFirst({
       where: {
         title: 'New Title',
         content: 'New Content',
