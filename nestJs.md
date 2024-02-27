@@ -8217,6 +8217,183 @@ describe('Answer questions tests (e2e)', () => {
  
  agora vamos no http module e adicionamos esse controller e o useCase.
  
+ ## editar resposta controller
+ vamos criar o arquivo edit-answer.controller.ts e tambem o seu teste
+ e nele vamos copiar o edit question
+ e no controller a gente muda o endereço para answers
+
+ @Controller('/answers/:id')
+ não faz sentido agora a gente colocar o /questionid porque para a gente qaui o questionId né:ao é uma informaçéao importante para editar uma resposta se a gente tem o id da resposta ja, é suficiente.
+ agora trocamos todos os editQustion por Editanswer e ajustamos a importação
+ a gente não precisa de title so content e não precisa do questionId então retiramos essas informações
+e adicionamos o answerId
+
+é ipmportante a gente notar que no nosso useCase a gente tem o erro de resourse not ound ou de not allowed. porem no nosso controller a gente não esta fazendo a tratativa desses erros. a gente so esta tendo um erro mais generico onde a gente não faz a validação para ver de que tipo é o erro. isso acontece porque esses erros especificos que temos no nosso useCase são bem raros, o erro de não existir a pergunta por exemplo não é uma questão que depende tanto da manipulação do usuario. ele teria que manipular muito errado, não é como errar uma senha que acontece sempre ou seja no controller a gente so faz a tratativa de erros que a gente espera que aconteça. não erros bem imporvaveis
+o nosso controller fica assim:
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpCode,
+  Param,
+  Put,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { EditAnswerUseCase } from '@/domain/forum/application/use-cases/edit-answer'
+
+const editAnswerBodySchema = z.object({
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(editAnswerBodySchema)
+
+type EditAnswerBodySchema = z.infer<typeof editAnswerBodySchema>
+
+@Controller('/answers/:id')
+export class EditAnswerController {
+  constructor(private editAnswer: EditAnswerUseCase) {}
+
+  @Put()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: EditAnswerBodySchema,
+    @Param('id') answerId: string,
+  ) {
+    const { content } = body
+    const userId = user.sub
+
+    const result = await this.editAnswer.execute({
+      content,
+      authorId: userId,
+      attachmentIds: [],
+      answerId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+vamos agora para o teste e a gente cola nele o answerQuestion porque ele ja tem os factories entéao vai ser mais facil
+mudamos o titulo para edit answer e o endereçono nome do test vamos precisar tambem do answer factory então a gente adiciona ele assim:
+describe('Edit answer tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  agora a gente cria a question como ja estava fazendo e criamos tambem uma answer usando o factory e a answer tem que ter tanto um questionId valido quanto um authorId ela fica assim:
+  
+    const answer = await answerFactory.makePrismaAnswer({
+      questionId: question.id,
+      authorId: user.id,
+    })
+    e como a gente usa o question.id a gente pode apagar o questionId que a gente tinha criado porque ele estava e string e para passar para a criação da answer precisa estar em uuid
+    se a gente deixasse gerar aultomaticamente ia dar erro porque no banco de dados a gente tem um relacionamento de foreing key
+    agora a gente pega o answer ID
+    e agora no resposnse a gente muda o metodo para put e coloca o novo endereço e um novo conteudo atualizado fica assim:
+      const response = await request(app.getHttpServer())
+      .put(`/answers/${answerId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New edited Answer',
+      })
+
+e nos expects o resultado tem que ser 204 e o conteudo do answer no database tem que ser esse que a gente colocou o arquivo fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Edit answer tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[PUT]/answers/:id', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const answer = await answerFactory.makePrismaAnswer({
+      questionId: question.id,
+      authorId: user.id,
+    })
+
+    const answerId = answer.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .put(`/answers/${answerId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New edited Answer',
+      })
+
+    expect(response.statusCode).toBe(204)
+
+    const answerOnDatabase = prisma.question.findFirst({
+      where: {
+        content: 'New edited Answer',
+      },
+    })
+
+    expect(answerOnDatabase).toBeTruthy()
+  })
+})
+
+agora vamos la no httpmodules para passar o controller e o useCase e no useCase temos que colocar o injectable
+
   
 
 
