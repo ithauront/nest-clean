@@ -8394,6 +8394,117 @@ describe('Edit answer tests (e2e)', () => {
 
 agora vamos la no httpmodules para passar o controller e o useCase e no useCase temos que colocar o injectable
 
+## controller de deletar resposta
+vamos criar o delete-answer.controller.ts e colar nele o delete question
+trocamos todos os questions por answer e funciona fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Delete,
+  HttpCode,
+  Param,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { DeleteAnswerUseCase } from '@/domain/forum/application/use-cases/delete-answer'
+
+@Controller('/answers/:id')
+export class DeleteAnswerController {
+  constructor(private deleteAnswer: DeleteAnswerUseCase) {}
+
+  @Delete()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('id') answerId: string,
+  ) {
+    const userId = user.sub
+
+    const result = await this.deleteAnswer.execute({
+      authorId: userId,
+      answerId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+agora copiamos o teste de delete question e colamos ele no delete-answer.controller.e2e-spec.ts
+adicionamos o factory do answer e no teste a gente cria a answer passando o authorid e o questionId criamos tambem a const answerId
+mudamos o endereço da chamada http
+o codigo esperado é 204
+ a const mudamos para answerOnDatabase procurando na table answer do prisma e onde o id é answerId
+ e esperamos o restultado null
+ fica assim:
+ import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Delete answer tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[DELETE]/answer/:id', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+    const answer = await answerFactory.makePrismaAnswer({
+      authorId: user.id,
+      questionId: question.id,
+    })
+    const answerId = answer.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .delete(`/answers/${answerId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({})
+
+    expect(response.statusCode).toBe(204)
+
+    const answerOnDatabase = prisma.answer.findUnique({
+      where: {
+        id: answerId,
+      },
+    })
+
+    expect(answerOnDatabase).toBeNull()
+  })
+})
+
+agora novamente httpmodues adicionar o useCase e o controller e colocar o injectable no useCase
+
   
 
 
