@@ -8205,9 +8205,9 @@ describe('Answer questions tests (e2e)', () => {
 
     expect(response.statusCode).toBe(201)
 
-    const answerOnDatabase = prisma.question.findFirst({
+    const answerOnDatabase = prisma.answer.findFirst({
       where: {
-        content: 'New Content',
+        content: 'New Answer',
       },
     })
 
@@ -8505,7 +8505,7 @@ describe('Delete answer tests (e2e)', () => {
 
 agora novamente httpmodues adicionar o useCase e o controller e colocar o injectable no useCase
 
-# listar resposta de perguntas
+## listar resposta de perguntas
 vamos fazer o arquivo fetch-question-answers.controller.ts
 por enquanto a gente vai deixar o controller previamente criado mas no futuro vão ter alterações a fazer nele.
 vamos colar nele o fetch-recent-question.ts
@@ -8703,7 +8703,7 @@ export class FetchQuestionAnswerController {
 agora vamos no httpmodume e colocamos o controller o useCase e no useCase a gente coloca o injectable
 mais para frente vamos atualizar os presenters e as listagens para trazer tambem dados de relaxionamento mas por enquanto é isso.
 
-# controller escolher melhor resposta
+## controller escolher melhor resposta
 choose-question-best-answer.ts
 vamos colar nele o editquestion
 podemos ja tirar todo o body e sua validação
@@ -8837,7 +8837,122 @@ describe('Choose best question answer tests (e2e)', () => {
 })
  e agora vamos no httpmodules e no useCase para passar as dependencias e o injectabel
 
- 
+## controller commentar pergunta
+comment-on-question.controller.ts e seu teste
+a gente vai copiar o answerquestion ajustamos as importações mudamos a rota para
+@Controller('/questions/:questionId/comments')
+e tiramos o attachments
+fica assim:
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { CommentOnQuestionUseCase } from '@/domain/forum/application/use-cases/comment-on-question'
+
+const commentOnQuestionBodySchema = z.object({
+  content: z.string(),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(commentOnQuestionBodySchema)
+
+type CommentOnQuestionBodySchema = z.infer<typeof commentOnQuestionBodySchema>
+
+@Controller('/questions/:questionId/comments')
+export class CommentOnQuestionController {
+  constructor(private commentOnQuestion: CommentOnQuestionUseCase) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('questionId') questionId: string,
+    @Body(bodyValidationPipe) body: CommentOnQuestionBodySchema,
+  ) {
+    const { content } = body
+    const userId = user.sub
+
+    const result = await this.commentOnQuestion.execute({
+      questionId,
+      content,
+      authorId: userId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+
+agora a gente copia o teste do answer question e coloca no teste do commentonquestion no teste a gente mudao os nomes e o endereço o content a gente muda para new comment ena commentOnDatabase a gene acessa o prisma.comment e cooca o content novo que a gente criou fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Comment on question tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/questions/:questionId/comments', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .post(`/questions/${questionId}/comments`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New Comment',
+      })
+
+    expect(response.statusCode).toBe(201)
+
+    const commentOnDatabase = await prisma.comment.findFirst({
+      where: {
+        content: 'New Comment',
+      },
+    })
+
+    expect(commentOnDatabase).toBeTruthy()
+  })
+})
+
+e vamos no httpmodule e colocamos as dependencias e tambem adicionamos o injectable no useCase
 
 
 
