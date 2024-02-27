@@ -8954,6 +8954,135 @@ describe('Comment on question tests (e2e)', () => {
 
 e vamos no httpmodule e colocamos as dependencias e tambem adicionamos o injectable no useCase
 
+ ## delete question comment
+ delete-question-comment.ts
+ vamos colar nele o delete answe e a rota vai ser essa
+ @Controller('/questions/comments/:id')
+ a gente substitui todos os deleteAnswer por deleteComment porem o nome do useCase é esse então temos que substituir a importação
+ DeleteCommentOnQuestionUseCase
+ e a gente pode renomear no controller para ficar padrão assim
+ import { DeleteCommentOnQuestionUseCase } from '@/domain/forum/application/use-cases/delete-comment-on-question'
+
+@Controller('/questions/comments/:id')
+export class DeleteQuestionCommentController {
+  constructor(private deleteQuestionComment: DeleteCommentOnQuestionUseCase) {}
+
+e ai a gente diq eu o id dos params é o questionCommentId e passamos ele embaixo o controller fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Delete,
+  HttpCode,
+  Param,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { DeleteCommentOnQuestionUseCase } from '@/domain/forum/application/use-cases/delete-comment-on-question'
+
+@Controller('/questions/comments/:id')
+export class DeleteQuestionCommentController {
+  constructor(private deleteQuestionComment: DeleteCommentOnQuestionUseCase) {}
+
+  @Delete()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('id') questionCommentId: string,
+  ) {
+    const userId = user.sub
+
+    const result = await this.deleteQuestionComment.execute({
+      authorId: userId,
+      commentOnQuestionId: questionCommentId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+agora para o teste a gente copia o delete answer importa o questionCommentFactory e retiramos o answerFacotry mudamos o titulo do teste
+
+
+  test('[DELETE]/questions/comments/:id', async () => {
+    agora a gente cria o usuario a pergunta e vamos criar um commentario no lugar da answer pegamos agora o id desse question comment e passamos ele na rota
+    
+    const questionCommentId = questionComment.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .delete(`/questions/comments/${questionCommentId}`)
+      
+      e agora o comment on Database a gente procura na tabalea comments um commentario com esse id e a gente espera que ele seja nulo porque apagamos ele
+      fica assim o teste
+      import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionCommentFactory } from 'test/factories/make-question-comment'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Delete question comment tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let questionCommentFactory: QuestionCommentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, QuestionCommentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    questionCommentFactory = moduleRef.get(QuestionCommentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[DELETE]/questions/comments/:id', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+    const questionComment =
+      await questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+      })
+
+    const questionCommentId = questionComment.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .delete(`/questions/comments/${questionCommentId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({})
+
+    expect(response.statusCode).toBe(204)
+
+    const commentOnDatabase = await prisma.comment.findUnique({
+      where: {
+        id: questionCommentId,
+      },
+    })
+
+    expect(commentOnDatabase).toBeNull()
+  })
+})
+
 
 
 
