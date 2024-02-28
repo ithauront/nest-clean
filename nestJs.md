@@ -9485,6 +9485,155 @@ describe('Fetch questions comments tests (e2e)', () => {
 
 agora a gente vai no http modules e no use case e pronto.
 
+## fetch-answer-comment.controller.ts
+agora vamos para o fetch-answer-comment.controller.ts colamos nele o fetch quesrtioncomment e substituimos todos question por answer e ajustmos as importações fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Query,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListAnswerCommentsUseCase } from '@/domain/forum/application/use-cases/list-answer-comment'
+import { CommentPresenter } from '../presenters/comment-presenter'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/answers/:answerId/answers')
+export class FetchAnswerCommentController {
+  constructor(private fetchAnswerComments: ListAnswerCommentsUseCase) {}
+
+  @Get()
+  async handle(
+    @Query('page', queryValidationPipe) page: PageParamsTypeSchema,
+    @Param('answerId') answerId: string,
+  ) {
+    const result = await this.fetchAnswerComments.execute({
+      page,
+      answerId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+    const answerComments = result.value.answerComments
+
+    return { comments: answerComments.map(CommentPresenter.toHTTP) }
+  }
+}
+
+agora vamos para o teste copiamos tambem o do fetchquestioncomment e nee precisamos do answerFactory e do answerCommentFactory porem não precisamos do questionCommentFactory. a gente então muda o endereço no titulo do teste e cria uma answer.
+e agora com essa answer nos vamos criar os nossos comentarios no promisse all e tambem pegamos a answerid usando o answer.id.tostring() para a gente colocar ele no endereço do teste. e fica assim o teste :
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { AnswerCommentFactory } from 'test/factories/make-answer-comment'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionCommentFactory } from 'test/factories/make-question-comment'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Fetch answers comments tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let answerCommentFactory: AnswerCommentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AnswerCommentFactory,
+        AnswerFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    answerCommentFactory = moduleRef.get(AnswerCommentFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/answers/:answerId/comments', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const answer = await answerFactory.makePrismaAnswer({
+      authorId: user.id,
+      questionId: question.id,
+    })
+
+    const answerId = answer.id.toString()
+
+    await Promise.all([
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 01',
+      }),
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 02',
+      }),
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 03',
+      }),
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 04',
+      }),
+    ])
+
+    const response = await request(app.getHttpServer())
+      .get(`/answers/${answerId}/comments`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      comments: expect.arrayContaining([
+        expect.objectContaining({ content: 'Comment 01' }),
+        expect.objectContaining({ content: 'Comment 02' }),
+        expect.objectContaining({ content: 'Comment 03' }),
+        expect.objectContaining({ content: 'Comment 04' }),
+      ]),
+    })
+  })
+})
+
+agora httpmodule e useCase para ajustar
+
+
 
 
 
