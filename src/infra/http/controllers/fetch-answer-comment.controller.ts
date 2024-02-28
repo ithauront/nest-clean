@@ -21,7 +21,7 @@ const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
 
 type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
 
-@Controller('/answers/:answerId/answers')
+@Controller('/answers/:answerId/comments')
 export class FetchAnswerCommentController {
   constructor(private fetchAnswerComments: ListAnswerCommentsUseCase) {}
 
