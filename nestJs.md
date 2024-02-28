@@ -9331,6 +9331,162 @@ describe('Delete answer comment tests (e2e)', () => {
 
 agora vamos no httpmodule e no use case fazer as alterações e esta tudo certo
 
+## controller de listagem de comentarios de peruntas
+vamos criar o fetch-question-comments.controller.ts e tambem seu teste 
+vamos colar nele o fetchquestionanswercontroller vamos substituidno os liste tudo mais para que tudo tenha a ver com questioncomments como nas de fetch tem o useCase que é com list e outras coisas que vai ser com fetch a gente tem que substituir com cuidado.
+a gente vai precisar de um presenter então vamos criar ele la na pasta presenter vamoscriar um comment-presenter.ts que vai servir para os questions e answer comment presenter por enquanto ele ainda vai ser simples e deois vamos aperfeiçoar ele assim como os outros.
+ele fica assim:
+import { Comment } from '@/domain/forum/enterprise/entities/comment'
+
+export class CommentPresenter {
+  static toHTTP(comment: Comment<any>) {
+    return {
+      id: comment.id.toString(),
+      content: comment.content,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+    }
+  }
+}
+
+porem esse Comment estava dando erro então para resolver a gente coloca o type dele como any
+e agora no nosso controller a gente pode usar esse presenter e fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Query,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListQuestionCommentsUseCase } from '@/domain/forum/application/use-cases/list-question-comments'
+import { AnswerPresenter } from '../presenters/answer-presenter'
+import { CommentPresenter } from '../presenters/comment-presenter'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/questions/:questionId/answers')
+export class FetchQuestionCommentController {
+  constructor(private fetchQuestionComments: ListQuestionCommentsUseCase) {}
+
+  @Get()
+  async handle(
+    @Query('page', queryValidationPipe) page: PageParamsTypeSchema,
+    @Param('questionId') questionId: string,
+  ) {
+    const result = await this.fetchQuestionComments.execute({
+      page,
+      questionId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+    const questionComments = result.value.questionComments
+
+    return { questionComments: questionComments.map(CommentPresenter.toHTTP) }
+  }
+}
+
+agora copiamos o fetchquestionAnswertest para o teste . a gente troca o answer factorypelo questioconmment factory
+o teste fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionCommentFactory } from 'test/factories/make-question-comment'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Fetch questions comments tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let questionCommentFactory: QuestionCommentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, QuestionCommentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    questionCommentFactory = moduleRef.get(QuestionCommentFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions/:questionId/comments', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    await Promise.all([
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 01',
+      }),
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 02',
+      }),
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 03',
+      }),
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 04',
+      }),
+    ])
+
+    const response = await request(app.getHttpServer())
+      .get(`/questions/${questionId}/comments`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      comments: expect.arrayContaining([
+        expect.objectContaining({ content: 'Comment 01' }),
+        expect.objectContaining({ content: 'Comment 02' }),
+        expect.objectContaining({ content: 'Comment 03' }),
+        expect.objectContaining({ content: 'Comment 04' }),
+      ]),
+    })
+  })
+})
+
+agora a gente vai no http modules e no use case e pronto.
+
+
+
 
 
 
