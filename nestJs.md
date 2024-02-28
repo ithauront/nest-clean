@@ -9633,6 +9633,201 @@ describe('Fetch answers comments tests (e2e)', () => {
 
 agora httpmodule e useCase para ajustar
 
+# uploads e relacionamentos
+
+## upload de arquivo
+vamos agora fazer o controller de upload de arquivo para os attachments 
+porque por enquanto quando a gente usa pergunta ou resposta a gente esta enviando anexos vazios, estamos sem enviar nenhum anexo no copor por enquanto.
+mas todas essas rotas recebem ids de anexos e néao os anexos em si e esses ids tem que ser criados previamente quando a gente for usar essas rotas. segundo a logica que a gente pensou la atras
+.então o que a gente vai fazer é seguir um fluxo assim
+temos uma rota para upload de arquivos que devolve um id desse arquivo e depois esse id é usado para a criação de outro recurso como os attachmentsid que vao estar na criaçao da pergunta ou resposta ou etc.
+seguir esse fluxo é bom porque em rest api a gente transiciona os dados entre front e back end usando json e json não funciona para upload de arquivo não da para enviar um arquivo dentro de um json (apenas convertendo ele para base-64 mas ai aumentaria muito o tamanho do arquivo)
+e por isso a gente separa uma requisição de uploados de arquivos a gente isola para que ela lide somente com upload de arquivos e néao com o restante.
+
+### upload attachment controller
+vamos então criar um arquivo nos controller
+upload-attachment-controller.ts
+a gente copia e cola nele o get question by slug
+e ele vai ter a rota attachments @Controller('/attachments') vai ser um POST
+nos não temos ainda o caso de uso então vamos deixar o construtor vazio e comentado e apagar tudo do miolo do controller ele fica meio vazio assim:
+import { Controller, Param } from '@nestjs/common'
+
+@Controller('/attachments')
+export class ClassToChange {
+  // constructor() {}
+
+  @Post()
+  async handle(@Param('slug') slug: string) {}
+}
+lembrando que vamos ter que trocar o nome da class
+o nest por baixo dos panos usa o express que é um microframework paranode, a gente pode mudar para fastify ou não no nosso caso a gente não mudou para o fastify. então para fazer uploads de arquivos a gente vai usar o multer
+então vamos instalar esse pacote
+npm i @types/multer -D
+
+e agora para fazer o upload a gente vai colocar o decorator no nosso controller depois do post 
+@
+  @Post()
+  @UseInterceptors(FileInterceptor('arquivo a dar upload'))
+  usamos o useInterceptor do nestcomun e depois dentro dele o FileInterceptor que temos que imoportar tambem e depois a gente passa para o file interceptor o arquivo que a gente quer dar upload
+  e agora no handle a gente usa o decorator uploadedFile para pegar os dados do arquivo.
+    async handle(@UploadedFile() file: Express.Multer.File) {}
+    e no tipo de file vai ser esse express multer file so que da erro porque ele não sabe que o tipo multer existe dentro da varivel global express
+para mudar isso vamos la no tsconfig e no types a gente adiciona o multer
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "es2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "forceConsistentCasingInFileNames": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "@/*":["./src/*"]
+    },
+    "types": ["vitest/globals", "multer"]
+
+  }
+}
+
+agora ja não da mais esse erro.
+
+agora no nosso controiller dentro do decorator uploadedfile a gente pode fazer uma verificação de arquivo então vamos colocar dentro dele toda uma logica que tem dentro la da documentação do nest. fica assim:
+
+  @Post()
+  @UseInterceptors(FileInterceptor('arquivo a dar upload'))
+  async handle(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 1000 }),
+          new FileTypeValidator({ fileType: 'image/jpeg' }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {}
+}
+
+esse numero de max size é em bytes então isso tem 1kb e a gente colocou como tipo de image em jpeg mas tudo isso pode ser alterado e é o que vamos fazer pq 1kb é mto pequento então a gente vai definir o tamanho usando calculo 1024 que é um kb * 1024 para dar 1mg e * 2 para ser 2mb
+e no filetype a gente pode passar em minetype que é esse que esta que é o tipo do arquivo seguindo de / e a extenão ou então a gente pode passar so a extençãio fazendo .(png|jpg|jpeg|pdf) assim fica mais facil de colocar varias variaveis de tipo
+e ai para visualizar a gente vai fazer um console.log(file) para ver o que aparece la no file.
+mudando ja o nome da classe ela fica assim
+import {
+  Controller,
+  FileTypeValidator,
+  MaxFileSizeValidator,
+  ParseFilePipe,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+
+@Controller('/attachments')
+export class UploadAttachmentController {
+  // constructor() {}
+
+  @Post()
+  @UseInterceptors(FileInterceptor('file'))
+  async handle(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({
+            maxSize: 1024 * 1024 * 2, // 2mb
+          }),
+          new FileTypeValidator({ fileType: '.(png|jpg|jpeg|pdf)' }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    console.log(file)
+  }
+}
+
+vamos no http module e colocamos ele
+e para testar ele a gente pode testar na mão usando nosso client.http
+mas vamos tamvbem fazer o teste dele para testar.
+upload-attachment.controller.e2e-spec.ts
+colamos nele o teste do get question by slug
+mudamos o nome para attachment upload podemos apagar o question factory deixar so o student pq precisamos esta logados
+e no respose a gente faz assim:
+
+    const response = await request(app.getHttpServer())
+      .post('/attachments')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+      porem a gente precisa enviar um arquivo então o que a gente faz no pc a gente escolhe qualquer arquivo pequeno como um pdf dentro da pasta test do nosso projeto a gente cria uma pasta chamada e2E e jogamos ele la. mudamos o nome dela para sample upload.
+      e agora ao invez do send a gente usa o metodo chamado attach
+      e dentro desse attach a gente coloca 'file' que é exatambem o mesmo nome que recebe no nosso controller isso é necessario e depois a gente envia o caminho para esse arquivo dessa forma:
+       const response = await request(app.getHttpServer())
+      .post('/attachments')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', './test/E2E/sample-upload.pdf')
+
+e agora o nosso expect é por enquanto apenas que de sucesso ou seja que seja um 201
+nosso teste por enquanto fica assim;
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('upload attachment - tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/attachments', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const response = await request(app.getHttpServer())
+      .post('/attachments')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', './test/E2E/sample-upload.pdf')
+
+    expect(response.statusCode).toBe(201)
+  })
+})
+
+e agora ao testar ele ja deve mostrar o console.log
+agora o que falta a gente fazer é pegar esse arquivo, salvar em algum lugar e cadastrar ele no banco de dados.
+para isso vamos criar o nosso caso de uso que vai salvar ele no banco de dados e nos dar um id para a gente relacionar com perguntas ou respostas.
+
+
+ 
+
+
+
 
 
 
