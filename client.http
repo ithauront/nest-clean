@@ -43,8 +43,4 @@ Authorization: Bearer {{AuthToken}}
 
 ###
 
-# @name upload-attachments
-POST {{baseUrl}}/attachments
-Content-Type: multipart/form-data
-Authorization: Bearer {{AuthToken}}
-< ./test/E2E/sample-upload.pdf
+

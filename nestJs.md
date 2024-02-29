@@ -9823,15 +9823,209 @@ e agora ao testar ele ja deve mostrar o console.log
 agora o que falta a gente fazer é pegar esse arquivo, salvar em algum lugar e cadastrar ele no banco de dados.
 para isso vamos criar o nosso caso de uso que vai salvar ele no banco de dados e nos dar um id para a gente relacionar com perguntas ou respostas.
 
+## caso de uso de upload de anexo
+vamos em domin forum aplication useCases
+upload-and-create-attachment.ts
+ cooiamos o registesutend e mudamos todos os registerStudent para upload and create attachment
 
- 
+na nossa entidade de attachment a gente tem titulo e link 
+então para nossa interface como vamos salvar isso o titulo vai ser o nome do anexo 
+então na interface nos vamos receber o fileName mas tambem o fileType poqrua a gente faz uma validação de tipo no controller so que essa validação esta no infra e no dominio a gente néao vai ter tanto conhecimento dessa validação para que o domain continue funcionando independente do infra caso a gente troque de infra. mas tambem porque quando a gente for fazer upload para algum lugar que vai lidar com isso como a amazon ou alguma aplicação qu vai receber o upload do arquivo a gente precisa informar o tipo do arquivo e nos vamos tambem receber o body do arquivo com o rquivo em si e no nosso caso vai ser umBuffer, mas podia ser alguma outra estrategia como b64 ou outras.
+interface UploadAndCreateAttachmentUseCaseRequest {
+  fileName: string
+  fileType: string
+  body: Buffer
+}
+como a gente esta usando arquivos pequenos de no max 2 mb a gente pode usar o buffer que funciona salvando esse arquivo na memoria de apos salvar ele o proprio garbage collector do node vai apagar isso da memoria. porem em algum momento vai ficar esses 2mb todo utilizados na memoria do sistema. o que poderia ser ruim se a gente tivesse possibilidade para arquivos maiores de 100mb por exemplo que em uma maquina mais fraca ficaria difici de rodar nossa aplicação e para isso a gente usaria então a alternativa de stream que o multer tambem suporta e que vai salvadno as coisas aos poucos e não ocupando tanta memoria ram.
+agora para o type a gente vai precisar criar um erro então vamos na pasta de erros e criamos o arquivo inalideattachmentTypi.ts e colamos nele um outro erro qualquer para modificar  o erro fica assim:
+import { UseCaseErrors } from '@/core/errors/use-case-errors'
+
+export class InvalidAttachmentTypeError extends Error implements UseCaseErrors {
+  constructor(type: string) {
+    super(`File type "${type}" is not supported`)
+  }
+}
+agora o nosso useCase vai devolver esse erro ou então o attachment que egamos das entidades
+type UploadAndCreateAttachmentUseCaseResponse = Either<
+  InvalidAttachmentTypeError,
+  {
+    attachment: Attachment
+  }
+>
+
+porem nos repositorios a gente tem o question attachment ou p answerAttachment so que esse useCase esta criando so um attachment que não é nem para uma pergunta ou resposta é so um anexo que depois vai ser direcionado
+vamos então criar um attachmentRepository para ser uma anexo antes de estar associado a uma pergunta ou resposta por enquanto ele vai ter apenas o metodo create. ele fica assim:
+import { Attachment } from '../../enterprise/entities/attachment'
+
+export abstract class AttachmentsRepository {
+  abstract create(attachment: Attachment): Promise<void>
+}
+agora no nosso usecase a gente pode colocar esse repository no construcotr e no execute a gente recebe filename filetype e body
 
 
+@Injectable()
+export class UploadAndCreateAttachmentUseCase {
+  constructor(private attachmentsRepository: AttachmentsRepository) {}
+
+  async execute({
+    fileName,
+    fileType,
+    body,
+  }: UploadAndCreateAttachmentUseCaseRequest): Promise<UploadAndCreateAttachmentUseCaseResponse> {
+
+    agora vamos começar a fazer o useCase
+    A PRIMEIRA COISA QUE A GENTE VAI FAZER 2 VALIDAR O TYPE  e para isso a gente vai pedir pro chatgpt criar um regex para validar memetype de png pdf jpg e jpeg ele faz esse regex
+    ^(image\/(jpeg|png))|^application\/pdf$
+agora a gente vai la no nosso controlle e joga dentro do if depos de // e depois dela eu dou um . e passamos o filetype entre parenteses e colocamos uma esclamação na frente para ver se ele néao passa para a gente dar nosso erro:
+    if (!/^(image\/(jpeg|png))$|application\/pdf$/.test(fileType))
+    agora que a validaçéao esta feita a gente pode criar o attachment então fazemod a const attachment a gente vai usar o attachmentCreate e a gente vai passar o title como foileName e o link (que vamos la na eintidade e mudamos para urm para ficar mais semantico)a entidade via ficar assim:
+    import { Entity } from '@/core/entities/entity'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+
+interface AttachmentProps {
+  title: string
+  url: string
+}
+
+export class Attachment extends Entity<AttachmentProps> {
+  get title() {
+    return this.props.title
+  }
+
+  get url() {
+    return this.props.url
+  }
+
+  static create(props: AttachmentProps, id?: UniqueEntityId) {
+    const attachment = new Attachment(props, id)
+    return attachment
+  }
+}
 
 
+e no nosso useCase a url vai estar ficticia por enquanto vamos colocar o fileName de novo pq essa url vai vir quando a gente subir esse attachment para algum sistema de storage então fica assim:
+ const attachment = Attachment.create({
+      title: fileName,
+      url: fileName,
+    })
+    a gente samva então isso no nosso attachlment repository e tambem retorna o attachment. a gente não usa o body ainda porque ainda não estamos fazendo upload do arquivo .
+    o useCase fica assim por enquanto:
+    import { Either, right, left } from '@/core/either'
+import { Injectable } from '@nestjs/common'
+import { InvalidAttachmentTypeError } from './errors/invalid-attachment-type'
+import { Attachment } from '../../enterprise/entities/attachment'
+import { AttachmentsRepository } from '../repositories/attachments-repository'
+
+interface UploadAndCreateAttachmentUseCaseRequest {
+  fileName: string
+  fileType: string
+  body: Buffer
+}
+
+type UploadAndCreateAttachmentUseCaseResponse = Either<
+  InvalidAttachmentTypeError,
+  {
+    attachment: Attachment
+  }
+>
+
+@Injectable()
+export class UploadAndCreateAttachmentUseCase {
+  constructor(private attachmentsRepository: AttachmentsRepository) {}
+
+  async execute({
+    fileName,
+    fileType,
+    body,
+  }: UploadAndCreateAttachmentUseCaseRequest): Promise<UploadAndCreateAttachmentUseCaseResponse> {
+    if (!/^(image\/(jpeg|png))$|^application\/pdf$/.test(fileType)) {
+      return left(new InvalidAttachmentTypeError(fileType))
+    }
+
+    const attachment = Attachment.create({
+      title: fileName,
+      url: fileName,
+    })
+
+    await this.attachmentsRepository.create(attachment)
+
+    return right({ attachment })
+  }
+}
+agora como eventualmente nos vamos fazer uma integração para esse uploade ser fora do nosso disco porque as aplicações hoje não faz sentido guardar nada em disco. a gente vai la em aplication e onde tem pastas como cryptography repositories useCase a gente vai cirar uma pasta chamada storage e nela um arquivo chamado uploader.ts
+o uploader vai ser um contrato, mas como é o next a gente não vai usar interface e sim uma abstract class e ele vai ter um unico metodo chamado upload que vai receber paramteros e vai devolver uma promisse que é uma url: string essa url vai ser o mink para onde nos enviamos o nosso arquivo. e nos vamos criar tambem uma interface que vai ser os parametros que esse upload vai receber que vao ser o filename fileType e o body fica assim:
+export interface UploaderParams {
+  fileName: string
+  fileType: string
+  body: Buffer
+}
+
+export abstract class Uploader {
+  abstract upload(params: UploaderParams): Promise<{ url: string }>
+}
+agora a gente volta para o useCase e agora no constructor a gente usa tambem a classe uploader e agora tambem antes de salvar no banco de dados a gente vai subir ele (por enquant de forma ficcticia ) usando o uploader.
+constructor(private attachmentsRepository: AttachmentsRepository, private uploader: Uploader) {}
 
 
+e para subir ele com o uploader a gente pode ja ir pegando a url dele para passar ela no lugar do filename onde a gente passa a url
+  const { url } = await this.uploader.upload({
+      body,
+      fileName,
+      fileType,
+    })
 
+    o arquivo todo fica assim ja passando a url
+    import { Either, right, left } from '@/core/either'
+import { Injectable } from '@nestjs/common'
+import { InvalidAttachmentTypeError } from './errors/invalid-attachment-type'
+import { Attachment } from '../../enterprise/entities/attachment'
+import { AttachmentsRepository } from '../repositories/attachments-repository'
+import { Uploader } from '../storage/uploader'
+
+interface UploadAndCreateAttachmentUseCaseRequest {
+  fileName: string
+  fileType: string
+  body: Buffer
+}
+
+type UploadAndCreateAttachmentUseCaseResponse = Either<
+  InvalidAttachmentTypeError,
+  {
+    attachment: Attachment
+  }
+>
+
+@Injectable()
+export class UploadAndCreateAttachmentUseCase {
+  constructor(
+    private attachmentsRepository: AttachmentsRepository,
+    private uploader: Uploader,
+  ) {}
+
+  async execute({
+    fileName,
+    fileType,
+    body,
+  }: UploadAndCreateAttachmentUseCaseRequest): Promise<UploadAndCreateAttachmentUseCaseResponse> {
+    if (!/^(image\/(jpeg|png))$|^application\/pdf$/.test(fileType)) {
+      return left(new InvalidAttachmentTypeError(fileType))
+    }
+
+    const { url } = await this.uploader.upload({
+      body,
+      fileName,
+      fileType,
+    })
+    const attachment = Attachment.create({
+      title: fileName,
+      url,
+    })
+
+    await this.attachmentsRepository.create(attachment)
+
+    return right({ attachment })
+  }
+}
 
 
   
