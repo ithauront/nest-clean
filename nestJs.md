@@ -10027,15 +10027,131 @@ export class UploadAndCreateAttachmentUseCase {
   }
 }
 
+## testando  caso de uso de upload do anexo
+vamos agora testar esse caso de uso.
+dentro da pasta de useCases a gente faz um novo arquivo com o mesmo nome do arquico e com spec no fim 
+upload-and-create-attachment.spec.ts
+a gente copia nele o teste de register student e trocamos o nome para upload and create attachment
+vamos precisar de um repositorio inmemory para a parte de attachment então vamos criar copiar o repositorio de student e colar em um novo arquivo chamado in-memory-attachment-repository.ts
+a gente apaga o metodo findbyemail e onde tem student a gente da replace por attachment
+e retiramos tambem a parte de domainevents fica assim:
+import { AttachmentsRepository } from '@/domain/forum/application/repositories/attachments-repository'
+import { Attachment } from '@/domain/forum/enterprise/entities/attachment'
 
-  
+export class InMemoryAttachmentsRepository implements AttachmentsRepository {
+  public items: Attachment[] = []
 
+  async create(attachment: Attachment) {
+    this.items.push(attachment)
+  }
+}
 
+agora voltamos para o teste e colocamos o inmemoryAttachmentRepository la no let e tambem o sut. porem para o sut a gente precisa não so do repository mas tambem do uploadre então vamos la na pasta test e vamos criar uma pasta storage la dentro e vamos nele criar um fake-uploader.ts e nele vamos colar o fakeencripter que temos em cryptography
+a gente implementa o ulpload nele e criamos uma propriedade interna public chamada uploads que vai ser um aray que vai armazenad varios oploads então apra isso a gente vai criar uma interface chamada upload e nela a gente vai botrar fileName e url e ai o public uploads vai ser upload[] = [] tem que fazer o =[] pq ele tem que inicializar vazio.
+agora na função upload async a gente vai pegar dosparams o fileName porque como estamos so fingindo que estamos fazendo o upload não precisamos dos tres. agora na implementação da função a gente faze um this.uploads.push(fileName ulr) e no caso da url a gente vai antes ter gerado um valor ficticio como é uma string a gente pode gerar uma id com o ramdom uuid e a gente tambem retorna essa url fica assim:
+import { randomUUID } from 'crypto'
+import {
+  Uploader,
+  UploaderParams,
+} from '../../src/domain/forum/application/storage/uploader'
 
+interface Upload {
+  fileName: string
+  url: string
+}
 
+export class FakeUploader implements Uploader {
+  public uploads: Upload[] = []
+  async upload({ fileName }: UploaderParams): Promise<{ url: string }> {
+    const url = randomUUID()
+    this.uploads.push({
+      fileName,
+      url,
+    })
+    return { url }
+  }
+}
 
+agora com isso feito a gente vai no nosso teste e podemos instanciar ela e passar ela para o sut
 
+let inMemoryAttachmentsRepository: InMemoryAttachmentsRepository
+let fakeUploader: FakeUploader
+let sut: UploadAndCreateAttachmentUseCase
 
+describe('upload and create attachment test', () => {
+  beforeEach(() => {
+    inMemoryAttachmentsRepository = new InMemoryAttachmentsRepository()
+    fakeUploader = new FakeUploader()
+    sut = new UploadAndCreateAttachmentUseCase(
+      inMemoryAttachmentsRepository,
+      fakeUploader,
+    )
+  })
 
+agora vamos para os testes if can upload and create an attachment
+e ai na cost result a gente envia o fileName o fileType que tem que ser um valor valido e um body a gente vai mandar um Buffer.from("") e mandamos uma string vazia dentro do from
+  const result = await sut.execute({
+      fileName: 'profile.png',
+      fileType: 'image/png',
+      body: Buffer.from(''),
+    })
+    e nos expects que seja true e que o result.value esteja dentro de attachment inmemoryattachmentrepository[0] e tambem que la dentro do nosso fakeUploader.uploads tenha mength de 1 ou seja tenha uma coisa la. e tambem que la nesse fakeUploads o primeiro item que tenha la seja igual a um objeto contendo fileName: 'profile.png  tambem um expect que 
+se a gente deixar so esse teste e rodar o teste ja deve passar e passou mas ainda vamos fazer um segundo teste. para que néao seja possivel fazer um opload com um tipo de arquivo errado usamos esse response passando o audio/mpeg e o result tem que ser left()
+ const result = await sut.execute({
+      fileName: 'profile.mp3',
+      fileType: 'audio/mpeg',
+      body: Buffer.from(''),
+    })
+    e tambem fazemos um expect para que o result value seja uma instancia do erro que a gente definiu que é o invalid attachment format o teste todo fica assim:
+    import { InMemoryAttachmentsRepository } from 'test/repositories/in-memory-attachment-repository'
+import { UploadAndCreateAttachmentUseCase } from './upload-and-create-attachment'
+import { FakeUploader } from 'test/storage/fake-uploader'
+import { InvalidAttachmentTypeError } from './errors/invalid-attachment-type'
+
+let inMemoryAttachmentsRepository: InMemoryAttachmentsRepository
+let fakeUploader: FakeUploader
+let sut: UploadAndCreateAttachmentUseCase
+
+describe('upload and create attachment test', () => {
+  beforeEach(() => {
+    inMemoryAttachmentsRepository = new InMemoryAttachmentsRepository()
+    fakeUploader = new FakeUploader()
+    sut = new UploadAndCreateAttachmentUseCase(
+      inMemoryAttachmentsRepository,
+      fakeUploader,
+    )
+  })
+  test('if can upload and create an attachment', async () => {
+    const result = await sut.execute({
+      fileName: 'profile.png',
+      fileType: 'image/png',
+      body: Buffer.from(''),
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value).toEqual({
+      attachment: inMemoryAttachmentsRepository.items[0],
+    })
+    expect(fakeUploader.uploads).toHaveLength(1)
+    expect(fakeUploader.uploads[0]).toEqual(
+      expect.objectContaining({
+        fileName: 'profile.png',
+      }),
+    )
+  })
+  test('if cannot upload with wrong file type', async () => {
+    const result = await sut.execute({
+      fileName: 'profile.mp3',
+      fileType: 'audio/mpeg',
+      body: Buffer.from(''),
+    })
+
+    expect(result.isLeft()).toBe(true)
+    expect(result.value).toBeInstanceOf(InvalidAttachmentTypeError)
+  })
+})
+
+## integracao de com cloudfare r3
+agora que a gente ja tem o caso de uso e o controller a gente precisa integrar os dois e para isso temos que salvar o osso upload em qlgum lugar, e por isso nos vamos usar uma integação com o cloudfare
 
 
