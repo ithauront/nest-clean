@@ -10153,5 +10153,82 @@ describe('upload and create attachment test', () => {
 
 ## integracao de com cloudfare r3
 agora que a gente ja tem o caso de uso e o controller a gente precisa integrar os dois e para isso temos que salvar o osso upload em qlgum lugar, e por isso nos vamos usar uma integação com o cloudfare
+existem varias aplições de integração para armazenamento de arquivos como a amazon s3. mas a gente vai usar o cloudfare r3 porque o amazon s3 precisa colocar cartãode credito e o amazon s3 cobra uma taxa para cada vez que vc baixa um arquivo. e caso os usuarios possam baixar os arquivos pode ficar caro. a gene vai usar o cloudfare que não cobra essa taxa e vamos usar a api do amazon s3 então caso a gente precise usar o amazon s3 é da mesma maneira é so trocar o endpoint
+então vamos criar uma conta no cloudfare
+apos criar a conta nos vamos na esquerda onde tem a dashboard e vamos na parte r2
+e vamos criar um new bucket. pelo visto precisa colocar o cartão de credito mas eles so cobram se a gente exceder o limite do gratuito
+o nome do bucket vai ser ignite-nest-clean
+e a regiao a gente coloca automatic
+e ai a gente clica em create bucket. a gente pode olhar as settings dele e tal mas não vamos configurar nada agora. a gente volta para r2 e vamos na direita clicar em manenger-r2apitokens e nele a gente vai criar uma api que a gente consiga fazer upload de arquivos dentro dela clicamos em criar api token e damos o nome de Ignite Nest Clean e vamos dclicar em object read and wrigth
+a gente coloca specific bucket e escolhe o que a gente criou e em ttl time to live a gente coloca forever e o resto a gente néao mexe e comoca create ap token
+agora voltamos para o nosso projeto e vamos no rquivo .env e colocamos nele as keys de acces e de secret acces key nele. a gente não vai usar a token vaue porque nos vamos usar a api da amazon.
+AWS_ACCESS_KEY_ID
+AWS_SECRET_KEY_ID
 
+e vamos precisar de mais duas env o nome do bucket e o id da conta na cloudflare que fica na direita.
+
+AWS_BUCKET_NAME="ignite-nest-clean"
+CLOUDFLARE_ID=
+
+com isso salvo a gente vai no nosso arquivoque faz a validação do env
+infra/env/env.ts
+copiamos as quarto variaveis que a gente criou. joga nele e troca o = por : e coloca z.string(),
+import { z } from 'zod'
+
+export const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().optional().default(3333),
+  JWT_PRIVATE_KEY: z.string(),
+  JWT_PUBLIC_KEY: z.string(),
+  AWS_BUCKET_NAME: z.string(),
+  CLOUDFLARE_ID: z.string(),
+  AWS_ACCESS_KEY_ID: z.string(),
+  AWS_SECRET_KEY_ID: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+
+e agora dentro da pasta infra fazemos a pasta storage e dentro dela o r2-storage.ts e nela a gente faz o r2uploader para implementar o uploader assim:
+import {
+  Uploader,
+  UploaderParams,
+} from '@/domain/forum/application/storage/uploader'
+
+export class r2Uploader implements Uploader {
+    private client: 
+  async upload({
+    fileName,
+    fileType,
+    body,
+  }: UploaderParams): Promise<{ url: string }> {
+    throw new Error('Method not implemented.')
+  }
+}
+
+e a gente vai criaresse private client para criar a coneção com o cloudflare mas para isso a gente precisa instalar o sdk da amazon então no terminalr a gente da npm i @aws-sdk/client-s3
+
+agora a gente vai importar da  awsS3 o s3client e o putobjectcommand a aws trabalha com co uma rota e o put object é o comando para fazer upma rota e o put object é o comando para fazer upload de arquivo. e ai o nosso client vai ser do tipo S2client e vamos fazer um constructor para instanciar ele assim
+    private client: S3client
+    constructor(){this.client = new S3client()}
+    agora esse s3ceient el que a gente vai pegar la na setingsendpoint que a gente vai pegar la na setings do buckt a gente copia e cola sem o nome do bucket e os numeros que vem antes 
+    a segunda delas é a acount id então a gente vai fazer uma inversão de dependencias e vamos pegar o nosso envservice pa nos temos o acointid e jogamos na frennos liugares dos numeros que vinham no endpoint
+    e temos tambem as infgormaçoes region quie a gente coloca auto e o c gente pega tamm o acces id e o secretid que a gente pega tambem la do env
+    } from '@/domain/forum/application/storage/uploader'
+
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { EnvService } from '../env/env.service'
+
+export class r2Uploader implements Uploader {
+  private client: S3Client
+  constructor(envService: EnvService) {
+    const acountId = envService.get('CLOUDFLARE_ID')
+    this.client = new S3Client({
+      endpoint: `https://${acountId}.r2.cloudflarestorage.com`,
+      region: 'auto',
+      credentials: {
+        accessKeyId: envService.get('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: envService.get('AWS_SECRET_KEY_ID'),
+      },
+    })
+  }
 
