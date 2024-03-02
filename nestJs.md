@@ -10232,3 +10232,169 @@ export class r2Uploader implements Uploader {
     })
   }
 
+  e agora a gente pode ir no na função no metodo de asybc upload e implementar ele
+  a gente precisa que os arquivos sejam lidos então a gente vai fazer umuploadId usando o ramdom uuid isso porqe podemos ter usuarios diferentes fazndo upload de arquivos diferentes mas com o mesmo nome.
+  e agora a gente faz um uniqueFileName interpolando  nome do arquivo com o fileId
+  }: UploaderParams): Promise<{ url: string }> {
+    const uploadId = randomUUID()
+    const uniqueFileName = `${uploadId}-${fileName}`
+    agora nos vamos fazer o upload que é this.client e usamos o send e dentro dele a gente vai passar o comando que o putObject e ai dentro do comando a gente passa as informações que vao ser o bucket e como o bucket esta no env a gente precisa colocar um privete antes do nosso envService no consttructor
+    ai dentro a gente joga o bucket o key qe é o nome do arquivo o content type que é o tipo do arquivo e o body que é o body
+    e depois a gente devolve uma url que é o nome do arquivo essa dica do nome do arquivo é boa porque o que se salva no banco de dados não é o arquivo todo, para não ficar pesado. a gente pode salvar um nome ou o url todo. a gente no caso so salva uma referencia porque salvar a url toda é um risco porque se a gente mudar o storage a url vai mudar mas o nome fica o mesmo. então fica mais faci e quando for vhamar a gente interpola. fca assim o qrauvio.
+    import {
+  Uploader,
+  UploaderParams,
+} from '@/domain/forum/application/storage/uploader'
+
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { EnvService } from '../env/env.service'
+import { randomUUID } from 'node:crypto'
+
+@Injectable()
+export class r2Storage implements Uploader {
+  private client: S3Client
+  constructor(private envService: EnvService) {
+    const acountId = envService.get('CLOUDFLARE_ID')
+    this.client = new S3Client({
+      endpoint: `https://${acountId}.r2.cloudflarestorage.com`,
+      region: 'auto',
+      credentials: {
+        accessKeyId: envService.get('AWS_ACCESS_KEY_ID'),
+        secretAccessKey: envService.get('AWS_SECRET_KEY_ID'),
+      },
+    })
+  }
+
+  async upload({
+    fileName,
+    fileType,
+    body,
+  }: UploaderParams): Promise<{ url: string }> {
+    const uploadId = randomUUID()
+    const uniqueFileName = `${uploadId}-${fileName}`
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.envService.get('AWS_BUCKET_NAME'),
+        Key: uniqueFileName,
+        ContentType: fileType,
+        Body: body,
+      }),
+    )
+    return {
+      url: uniqueFileName,
+    }
+  }
+}
+
+agora vamos criar o storage.module.tsnos moesmos modles do outros com useCalss e providers
+e a gente usa import do envmodules porque o storage usa o env service. fica assim:
+import { Uploader } from '@/domain/forum/application/storage/uploader'
+import { Module } from '@nestjs/common'
+import { r2Storage } from './r2-storage'
+import { EnvModule } from '../env/env.module'
+
+@Module({
+  imports: [EnvModule],
+  providers: [
+    {
+      provide: Uploader,
+      useClass: r2Storage,
+    },
+  ],
+  exports: [Uploader],
+})
+export class StorageModule {}
+
+agora vamos no httpmodule e nele a gente da import no storageModule e coloca o useCase dos upload ele fica assim:
+import { Module } from '@nestjs/common'
+import { AutenticateController } from './controllers/autentication.controller'
+import { CreateAccountController } from './controllers/create-account.controller'
+import { CreateQuestionController } from './controllers/create-question.controller'
+import { FetchRecentQuestionsController } from './controllers/fetch-recent-questions.controller'
+import { DatabaseModule } from '../database/prisma/database.module'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+import { ListRecentQuestionsUseCase } from '@/domain/forum/application/use-cases/list-recent-questions'
+import { AutenticateStudentUseCase } from '@/domain/forum/application/use-cases/autenticate-student'
+import { RegisterStudentUseCase } from '@/domain/forum/application/use-cases/register-student'
+import { CryptographyModule } from '../cryptography/cryptography.module'
+import { GetQuestionBySlugController } from './controllers/get-question-by-slug.controller'
+import { GetQuestionBySlugUseCase } from '@/domain/forum/application/use-cases/get-question-by-slug'
+import { EditQuestionController } from './controllers/edit-question.controller'
+import { EditQuestionUseCase } from '@/domain/forum/application/use-cases/edit-question'
+import { DeleteQuestionController } from './controllers/delete-question.controller'
+import { DeleteQuestionUseCase } from '@/domain/forum/application/use-cases/delete-question'
+import { AnswerQuestionController } from './controllers/answer-question.controller'
+import { AnswerQuestionUseCase } from '@/domain/forum/application/use-cases/answer-question'
+import { EditAnswerController } from './controllers/edit-answer.controller'
+import { EditAnswerUseCase } from '@/domain/forum/application/use-cases/edit-answer'
+import { DeleteAnswerController } from './controllers/delete-answer.controller'
+import { DeleteAnswerUseCase } from '@/domain/forum/application/use-cases/delete-answer'
+import { FetchQuestionAnswerController } from './controllers/fetch-question-answers.controller'
+import { ListQuestionsAnswersUseCase } from '@/domain/forum/application/use-cases/list-question-answers'
+import { ChooseQuestionBestAnswerController } from './controllers/choose-question-best-answer'
+import { ChooseQuestionBestAnswerUseCase } from '@/domain/forum/application/use-cases/choose-question-best-answer'
+import { CommentOnQuestionController } from './controllers/comment-on-question.controller'
+import { CommentOnQuestionUseCase } from '@/domain/forum/application/use-cases/comment-on-question'
+import { DeleteQuestionCommentController } from './controllers/delete-question-comment'
+import { DeleteCommentOnQuestionUseCase } from '@/domain/forum/application/use-cases/delete-comment-on-question'
+import { CommentOnAnswerController } from './controllers/comment-on-answer.controller'
+import { CommentOnAnswerUseCase } from '@/domain/forum/application/use-cases/comment-on-answer'
+import { DeleteAnswerCommentController } from './controllers/delete-answer-comment.controller'
+import { DeleteCommentOnAnswerUseCase } from '@/domain/forum/application/use-cases/delete-comment-on-answer'
+import { ListQuestionCommentsUseCase } from '@/domain/forum/application/use-cases/list-question-comments'
+import { FetchQuestionCommentController } from './controllers/fetch-question-comments.controller'
+import { FetchAnswerCommentController } from './controllers/fetch-answer-comment.controller'
+import { ListAnswerCommentsUseCase } from '@/domain/forum/application/use-cases/list-answer-comment'
+import { UploadAttachmentController } from './controllers/upload-attachment.controller'
+import { StorageModule } from '../storage/storage.module'
+import { UploadAndCreateAttachmentUseCase } from '@/domain/forum/application/use-cases/upload-and-create-attachment'
+
+@Module({
+  imports: [DatabaseModule, CryptographyModule, StorageModule],
+  controllers: [
+    CreateAccountController,
+    AutenticateController,
+    CreateQuestionController,
+    FetchRecentQuestionsController,
+    GetQuestionBySlugController,
+    EditQuestionController,
+    DeleteQuestionController,
+    AnswerQuestionController,
+    EditAnswerController,
+    DeleteAnswerController,
+    FetchQuestionAnswerController,
+    ChooseQuestionBestAnswerController,
+    CommentOnQuestionController,
+    DeleteQuestionCommentController,
+    CommentOnAnswerController,
+    DeleteAnswerCommentController,
+    FetchQuestionCommentController,
+    FetchAnswerCommentController,
+    UploadAttachmentController,
+  ],
+  providers: [
+    CreateQuestionUseCase,
+    ListRecentQuestionsUseCase,
+    AutenticateStudentUseCase,
+    RegisterStudentUseCase,
+    GetQuestionBySlugUseCase,
+    EditQuestionUseCase,
+    DeleteQuestionUseCase,
+    AnswerQuestionUseCase,
+    EditAnswerUseCase,
+    DeleteAnswerUseCase,
+    ListQuestionsAnswersUseCase,
+    ChooseQuestionBestAnswerUseCase,
+    CommentOnQuestionUseCase,
+    DeleteCommentOnQuestionUseCase,
+    CommentOnAnswerUseCase,
+    DeleteCommentOnAnswerUseCase,
+    ListQuestionCommentsUseCase,
+    ListAnswerCommentsUseCase,
+    UploadAndCreateAttachmentUseCase,
+  ],
+})
+export class HttpModule {}
+
+

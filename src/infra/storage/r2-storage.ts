@@ -5,10 +5,13 @@ import {
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { EnvService } from '../env/env.service'
+import { randomUUID } from 'node:crypto'
+import { Injectable } from '@nestjs/common'
 
-export class r2Uploader implements Uploader {
+@Injectable()
+export class r2Storage implements Uploader {
   private client: S3Client
-  constructor(envService: EnvService) {
+  constructor(private envService: EnvService) {
     const acountId = envService.get('CLOUDFLARE_ID')
     this.client = new S3Client({
       endpoint: `https://${acountId}.r2.cloudflarestorage.com`,
@@ -25,6 +28,19 @@ export class r2Uploader implements Uploader {
     fileType,
     body,
   }: UploaderParams): Promise<{ url: string }> {
-    throw new Error('Method not implemented.')
+    const uploadId = randomUUID()
+    const uniqueFileName = `${uploadId}-${fileName}`
+
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.envService.get('AWS_BUCKET_NAME'),
+        Key: uniqueFileName,
+        ContentType: fileType,
+        Body: body,
+      }),
+    )
+    return {
+      url: uniqueFileName,
+    }
   }
 }
