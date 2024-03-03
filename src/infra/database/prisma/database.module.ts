@@ -59,7 +59,7 @@ import { PrismaAttachmentsRepository } from './repositories/prisma-attachments-r
     QuestionCommentsRepository,
     QuestionsRepository,
     StudentsRepository,
-    PrismaAttachmentsRepository,
+    AttachmentsRepository,
   ],
 })
 export class DatabaseModule {}
