@@ -10397,4 +10397,233 @@ import { UploadAndCreateAttachmentUseCase } from '@/domain/forum/application/use
 })
 export class HttpModule {}
 
+## integrando o controller de upload
+agora vamos no nosso controller de upload e no constructor a gente faz u private uploadattachment que vai usar o uploadattachmentuseCAS
+xport class UploadAttachmentController {
+  constructor(
+    private uploadAndCreateAttachment: UploadAndCreateAttachmentUseCase,
+  ) {}
+ e agora la onde tinha o conseole.log a gente vaitirar e vai colocar uma const result para ser uma chamada para esse useCase usando a funçéao create e a fente passa o fileName Filetype e o body e esses pontos vem de diferentes coisas que estão dentro do file que a gente pegou fica assim:
+     file: Express.Multer.File,
+  ) {
+    const result = await this.uploadAndCreateAttachment.execute({
+      fileName: file.originalname,
+      fileType: file.mimetype,
+      body: file.buffer,
 
+      ogirinal name mimetype e buffer do file
+
+      agora a gente faz uma tatartiva de erro verificando if(isLeft())
+
+          if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case InvalidAttachmentTypeError:
+          throw new BadRequestException(error.message)
+        default:
+          throw new BadRequestException(error.message)
+      }
+    }
+    ai a gente ve o tipp de erro e joga ele como sendo badRequest na verdade qualquer erro vai ser o badRequest porque o defalut a gente tambem joga esse mas so estamos deixando separado para poder izer que esse useCase pode retornar esse invalidAttachmanetType error
+
+    se passar sem cair nessez erro a gente pega o attachment do result.value e retorna apenas o attachlmentId fica assim:
+
+    import { InvalidAttachmentTypeError } from '@/domain/forum/application/use-cases/errors/invalid-attachment-type'
+import { UploadAndCreateAttachmentUseCase } from '@/domain/forum/application/use-cases/upload-and-create-attachment'
+import {
+  BadRequestException,
+  Controller,
+  FileTypeValidator,
+  MaxFileSizeValidator,
+  ParseFilePipe,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+
+@Controller('/attachments')
+export class UploadAttachmentController {
+  constructor(
+    private uploadAndCreateAttachment: UploadAndCreateAttachmentUseCase,
+  ) {}
+
+  @Post()
+  @UseInterceptors(FileInterceptor('file'))
+  async handle(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({
+            maxSize: 1024 * 1024 * 2, // 2mb
+          }),
+          new FileTypeValidator({ fileType: '.(png|jpg|jpeg|pdf)' }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    const result = await this.uploadAndCreateAttachment.execute({
+      fileName: file.originalname,
+      fileType: file.mimetype,
+      body: file.buffer,
+    })
+
+    if (result.isLeft()) {
+      const error = result.value
+
+      switch (error.constructor) {
+        case InvalidAttachmentTypeError:
+          throw new BadRequestException(error.message)
+        default:
+          throw new BadRequestException(error.message)
+      }
+    }
+
+    const { attachment } = result.value
+
+    return { attachmentId: attachment.id.toString() }
+  }
+}
+
+
+com isso em mãos vamos para o teste desse controller.
+muitagente faria nesse caso um mock para o cloudFlare mas isso não é o ideal porque temos que realmente testar o end2end de uma aplicação para saber se ele vai pra produção corretamente.
+no teste que a gente tinha la a gente cria um novo expect para ver se esta vindo um attachmentId com a string fica assim esse expect
+expect(response.body).toEqual({
+      attachmentId: expect.any(String),
+    })
+    temos que ir no database.modules para colocar o repositorio e precismos tambem criar o prismaAttachments repsitorio entãop primeiro criamos esse arquivo la na pasta de repositories
+
+    fica assim mas ai precismos tambem de um mapper
+    import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { AttachmentsRepository } from '@/domain/forum/application/repositories/attachments-repository'
+import { Attachment } from '@/domain/forum/enterprise/entities/attachment'
+import { PrismaAttachmentsMapper } from '../mappers/prisma-attachment-mapper'
+
+@Injectable()
+export class PrismaAttachmentsRepository implements AttachmentsRepository {
+  constructor(private prisma: PrismaService) {}
+  async create(attachment: Attachment): Promise<void> {
+    const data = PrismaAttachmentsMapper.toPrisma(attachment)
+
+    await this.prisma.attachment.create({
+      data,
+    })
+  }
+}
+
+vamos na pasta de mappers e criamos o prisma-attachment-mapper.ts
+fica assim:
+import { Attachment } from '@/domain/forum/enterprise/entities/attachment'
+import { Prisma } from '@prisma/client'
+
+export class PrismaAttachmentsMapper {
+  static toPrisma(
+    attachment: Attachment,
+  ): Prisma.AttachmentUncheckedCreateInput {
+    return {
+      id: attachment.id.toString(),
+      title: attachment.title,
+      url: attachment.url,
+    }
+  }
+}
+
+e agora funciona o repository pegando o attachment
+
+agora no database modules a gente pode usar o repositorio no providers e tambem passar ele no exports fiva assim:
+
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentsRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { PrismaStudentsRepository } from './repositories/prisma-students-repository'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { AttachmentsRepository } from '@/domain/forum/application/repositories/attachments-repository'
+import { PrismaAttachmentsRepository } from './repositories/prisma-attachments-repository'
+
+@Module({
+  providers: [
+    PrismaService,
+    {
+      provide: AnswerAttachmentsRepository,
+      useClass: PrismaAnswerAttachmentsRepository,
+    },
+    { provide: AnswersRepository, useClass: PrismaAnswersRepository },
+    {
+      provide: AnswerCommentsRepository,
+      useClass: PrismaAnswerCommentsRepository,
+    },
+    {
+      provide: QuestionAttachmentsRepository,
+      useClass: PrismaQuestionAttachmentsRepository,
+    },
+    {
+      provide: QuestionCommentsRepository,
+      useClass: PrismaQuestionCommentsRepository,
+    },
+    {
+      provide: QuestionsRepository,
+      useClass: PrismaQuestionsRepository,
+    },
+    {
+      provide: StudentsRepository,
+      useClass: PrismaStudentsRepository,
+    },
+    {
+      provide: AttachmentsRepository,
+      useClass: PrismaAttachmentsRepository,
+    },
+  ],
+  exports: [
+    PrismaService,
+    AnswerAttachmentsRepository,
+    AnswersRepository,
+    AnswerCommentsRepository,
+    QuestionAttachmentsRepository,
+    QuestionCommentsRepository,
+    QuestionsRepository,
+    StudentsRepository,
+    PrismaAttachmentsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+agora se a gente rodar os testes a gente pode ir no cloudflare e depois dos testes olhar se ele esta la dentro de objects . se o teste passar o arquvioddeve estar la
+porem qi ainda temos um problema por estarmos jogando os arquivos de teste no mesmop bucket do de produção. e ai ficaria cheio de lixo no bucket de produção então o que vamos fazer é la no cloudflare a gente vai criar um bucket novo so para testes e col ele criado vamos em settings elm object life cycle rules e vamos add rule e vamos colocar o nome delete all files para 1 dia depois da criação deles
+e damos add rule para confirmar essaregra
+agora copiamo o nome do bucket e criamos um arquivo na raiz .env.test e colocamos ele tambmem no gitignore
+e vamos substuir a variavel de bucketname posso colocar como ficou o env test aqui porque néao é nada sensivel fica assim:
+# override env variables during test
+AWS_BUCKET_NAME="ignite-nest-clean-test"
+
+e ai no nosso arquivo de setup end2end que é onde ele carega a configuração antes dos testes ele ta importando o envConfig que é onde as variaveis estão sendo carregadas
+e o nest le tambem as variaveis ambiente com o configService.
+porem o nest esta atualmente com u problema que eles estão trabalhando para resolver que é a abilidade de fazer override nas variaveis ambiente ou seja trocar uma por uma outra
+então quando a gente roda os testes e ele tem o config dotEnv o config service quando a gente rodar o aplicativoele não vai carregar novamente as variaveis ambiente ele vai levar em consideração as que ja foram carregadas. então se a gente quiser carregar o arquivo env.test a gente vai ter que carregar ele no arquivo setupE2E porque é ele que carrega as variaveis do ambiente de teste
+então no setup-e2e.ts ao inves de carregar o config como estava dessa forma
+import 'dotenv/config'
+
+a gente vai carregar assim para poder usar o config 
+import { config } from 'dotenv'
+
+e agora  a gente usa o config assim
+ config() fora da função antes do prisma logo depois das importações. e ai a gente pode passar configurações dentro dess config
+ vamos passar um path para ele carregar primeiramente as variaveis do .env mas depois passamos a override como true
+ config({ path: '.env', override: true })
+ e executamos isso uma segunda vez passando o arquivo .env.test assim ele le o arquivo env e ve que se tiver alguma varavel que ja tivesse definida anteriormente ele vai substituir ela com um novo valor e ele faz isso uma segunda vez com o test assim vai sustituir o valor do nome do bucket
+ gora para não dar erro a gente tem que voltar la no cloudFlare e configurar a nossa chave de api para tambem ter acesso ao bucket de teste do lado direito no r2 a gente vai em menage api tokens vai em edit o token e desce ate encontrar os cukets que ela tem acesso e ai é so colocar o novo bucket.
+ 
