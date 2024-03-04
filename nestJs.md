@@ -10627,3 +10627,145 @@ e agora  a gente usa o config assim
  e executamos isso uma segunda vez passando o arquivo .env.test assim ele le o arquivo env e ve que se tiver alguma varavel que ja tivesse definida anteriormente ele vai substituir ela com um novo valor e ele faz isso uma segunda vez com o test assim vai sustituir o valor do nome do bucket
  gora para não dar erro a gente tem que voltar la no cloudFlare e configurar a nossa chave de api para tambem ter acesso ao bucket de teste do lado direito no r2 a gente vai em menage api tokens vai em edit o token e desce ate encontrar os cukets que ela tem acesso e ai é so colocar o novo bucket.
  
+ # perguntas com anexos
+ agora que nosso projeto ja esta fazendo upload a gente tem que nos controllers pegar os attachments de forma real e enviar ele para o caso de uso. por enquanto a gente esta enviando um attachment vazio assim attachments: []
+ porem a gente não começa na camada de nfra vamos começar nos casos de uso. atualmente no caso de uso de create question a gente recebe o id dos attachments a gente cria o attachment e salva dentro de question.Attachment por que é uma watchedlist
+ e chamamos o metodo create do questions repository
+ o metodo create pega os dados da pergunta porem em nenhum momento a gente salva os anexos no banco de dados. eles so estão salvos dentro da pergunta
+ vamos começar a fazer alguns testes para ajustar isso então
+ a primeira coisa que temos que lembrar é que a question é um agregado que é um conjunto de entidades que caminham juntas a question é o root do agregado e o attachment faz parte desse agregado. quando salvamos o agregado é uimportante que as informações como a lista de anexo seja salva junta.
+ entéao vamos começar a fazer isso pelos repositorios de inmemory
+ no inmemory de question no metodo create a gente salva a pergunta mas os anexos em si eles néao estão sendo salvos.
+ então vamos no metodo questionAttachmentrepository (sem o inmemory) hoje ele so tem metodopara buscar e deletar. e nos vamos criar dois novos metodos nele um que vai criar varios e um que vai deletar varios
+  abstract createMany(attachments: QuestionAttachment[]): Promise<void>
+  abstract deleteMany(attachments: QuestionAttachment[]): Promise<void>
+  fica assim:
+  import { QuestionAttachment } from '../../enterprise/entities/question-attachment'
+
+export abstract class QuestionAttachmentsRepository {
+  abstract createMany(attachments: QuestionAttachment[]): Promise<void>
+  abstract deleteMany(attachments: QuestionAttachment[]): Promise<void>
+  abstract findManyByQuestionId(
+    questionId: string,
+  ): Promise<QuestionAttachment[]>
+
+  abstract deleteManyByQuestionId(questionId: string): Promise<void>
+}
+
+  eles vao receber ula lista de anexos e salvar e o outro vai receber essa lista e deletar
+   no nosso banco de dados hoje criar o anexo néao significa criar uma nova coluna no banco de dados porque quando criarmos um anexo a gente cria um registro na tabela attachment so que ele é criado sem relacionamento com uma pergunta ou resposta então quando a gente salvaro anexo a gente ão esta criando um novo anexo e sim criando o relacionamento
+   porque ao salvar a gente so esta enviando os ids para relacionar.
+   agora que ja temos esses metodos a gente pode ir no inmemory questions repository e aplicar eles
+
+e ao implementar eles no create many é o push so que como são varios a gente usa retcencias entes e no delete é um filtro e vamos verificar o que tem te igual aos attachment da lista assim a gente usa o some para identificar os que são iguais aos que vem da lista que a gente passa para a função e a gente passa o ! antes dele para pegar so os que não são iguais e depois a gente atualiza o valor de attachments para todos que não são iguais. a pagina com os dois metodos fica assim:
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+export class InMemoryQuestionAttachmentsRepository
+  implements QuestionAttachmentsRepository
+{
+  public items: QuestionAttachment[] = []
+
+  async findManyByQuestionId(questionId: string) {
+    const questionAttachments = this.items.filter(
+      (item) => item.questionId.toString() === questionId,
+    )
+
+    return questionAttachments
+  }
+
+  async createMany(attachments: QuestionAttachment[]): Promise<void> {
+    this.items.push(...attachments)
+  }
+
+  async deleteMany(attachments: QuestionAttachment[]): Promise<void> {
+    const questionAttachments = this.items.filter((item) => {
+      return !attachments.some((attachment) => attachment.equals(item))
+    })
+    this.items = questionAttachments
+  }
+
+  async deleteManyByQuestionId(questionId: string) {
+    const questionAttachments = this.items.filter(
+      (item) => item.questionId.toString() !== questionId,
+    )
+    this.items = questionAttachments
+  }
+}
+agora vamos para o inmemory questions reporitory que ja usa o attachment repository e no metodo create e  save dele a gente vai chamar tambem o metodo para integrar com o repositorio de attachments
+pegando eles a travez do question.attachment.getItems para pegar os attachments de dentro da question
+no metodo save vai ser um pouco diferente porquea a gente pode ter tanto adicionado quanto deletado attachments então a gente chama o createMany para os newItens e o deleteMany para os removedItens e é para isso que usamos a watchedList isso é a grande vantagem monitorando as modificação acho que no delete não precisa fazer nada por conta do efeito cascata do prisma que vai deletar tambem os anexos. fica assim:
+import { DomainEvents } from '@/core/event/domain-events'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+
+export class InMemoryQuestionsRepository implements QuestionsRepository {
+  public items: Questions[] = []
+
+  constructor(
+    private questionAttachmentsRepository: QuestionAttachmentsRepository,
+  ) {}
+
+  async create(question: Questions) {
+    this.items.push(question)
+
+    await this.questionAttachmentsRepository.createMany(
+      question.attachment.getItems(),
+    )
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+
+  async findById(id: string) {
+    const question = this.items.find((item) => item.id.toString() === id)
+    if (!question) {
+      return null
+    }
+    return question
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = this.items.find((item) => item.slug.value === slug)
+    if (!question) {
+      return null
+    }
+    return question
+  }
+
+  async findManyRecent({ page }: PaginationParams) {
+    const questions = this.items
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice((page - 1) * 20, page * 20)
+
+    return questions
+  }
+
+  async delete(question: Questions) {
+    const itemIndex = this.items.findIndex((item) => item.id === question.id)
+    this.items.splice(itemIndex, 1)
+
+    this.questionAttachmentsRepository.deleteManyByQuestionId(
+      question.id.toString(),
+    )
+  }
+
+  async save(question: Questions) {
+    const itemIndex = this.items.findIndex((item) => item.id === question.id)
+
+    this.items[itemIndex] = question
+
+    await this.questionAttachmentsRepository.createMany(
+      question.attachment.getNewItems(),
+    )
+    await this.questionAttachmentsRepository.deleteMany(
+      question.attachment.getRemovedItems(),
+    )
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+}
+
+agora para o teste disso
+vamos la no create question.spec e criamos um novo teste a gente cria a pergunta colmo,estavamos fazendo antes crimaos o attachment 1 e 2 e agora nos expects a gente faz
+
+

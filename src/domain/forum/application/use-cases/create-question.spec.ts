@@ -42,4 +42,16 @@ describe('create question test', () => {
       }),
     ])
   })
+  test('if can create an attachment persistence when question is created', async () => {
+    const result = await sut.execute({
+      authorId: '1',
+      title: 'question',
+      content: 'this question?',
+      attachmentIds: ['1', '2'],
+    })
+
+    expect(result.isRight()).toBe(true)
+    
+  })
+
 })
