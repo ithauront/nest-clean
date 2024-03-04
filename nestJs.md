@@ -10766,6 +10766,238 @@ export class InMemoryQuestionsRepository implements QuestionsRepository {
 }
 
 agora para o teste disso
-vamos la no create question.spec e criamos um novo teste a gente cria a pergunta colmo,estavamos fazendo antes crimaos o attachment 1 e 2 e agora nos expects a gente faz
+vamos la no create question.spec e criamos um novo teste a gente cria a pergunta colmo,estavamos fazendo antes crimaos o attachment 1 e 2 e agora nos expects a gente faz que espera que nos items dentro do questionattachmentrepository tenha length 2
+podemos ir mais longe e verificar se nos items tem um array e dentro dele dois objetos ques são a entetidade questionAttachment então ele deve ter uma id sendo um new uniqueentityId uma sendo 1 e o outro sendo 2 assim a gente esta garantido que ao criar uma pergunta ele tambem esta persistindo os attachments fica assim esse teste:
+test('if can create an attachment persistence when question is created', async () => {
+    const result = await sut.execute({
+      authorId: '1',
+      title: 'question',
+      content: 'this question?',
+      attachmentIds: ['1', '2'],
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryQuestionsAttachmentRepository.items).toHaveLength(2)
+    expect(inMemoryQuestionsAttachmentRepository.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('1'),
+        }),
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('2'),
+        }),
+      ]),
+    )
+o qrauivo todo fica assim:
+import { InMemoryQuestionAttachmentsRepository } from 'test/repositories/in-memory-question-attachment-repository'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { CreateQuestionUseCase } from './create-question'
+import { InMemoryQuestionsRepository } from 'test/repositories/in-memory-questions-repository'
+
+let inMemoryQuestionsRepository: InMemoryQuestionsRepository
+let inMemoryQuestionsAttachmentRepository: InMemoryQuestionAttachmentsRepository
+let sut: CreateQuestionUseCase
+
+describe('create question test', () => {
+  beforeEach(() => {
+    inMemoryQuestionsAttachmentRepository =
+      new InMemoryQuestionAttachmentsRepository()
+    inMemoryQuestionsRepository = new InMemoryQuestionsRepository(
+      inMemoryQuestionsAttachmentRepository,
+    )
+    sut = new CreateQuestionUseCase(inMemoryQuestionsRepository)
+  })
+
+  test('if can create an question', async () => {
+    const result = await sut.execute({
+      authorId: '1',
+      title: 'question',
+      content: 'this question?',
+      attachmentIds: ['1', '2'],
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value?.question.content).toEqual('this question?')
+    expect(inMemoryQuestionsRepository.items[0]).toEqual(result.value?.question)
+    expect(
+      inMemoryQuestionsRepository.items[0].attachment.currentItems,
+    ).toHaveLength(2)
+    expect(
+      inMemoryQuestionsRepository.items[0].attachment.currentItems,
+    ).toEqual([
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('2'),
+      }),
+    ])
+  })
+  test('if can create an attachment persistence when question is created', async () => {
+    const result = await sut.execute({
+      authorId: '1',
+      title: 'question',
+      content: 'this question?',
+      attachmentIds: ['1', '2'],
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryQuestionsAttachmentRepository.items).toHaveLength(2)
+    expect(inMemoryQuestionsAttachmentRepository.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('1'),
+        }),
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('2'),
+        }),
+      ]),
+    )
+  })
+})
+
+    agora vamos fazer o ultimo ajuste que é na parte de edição
+    entao vamos para o arquivo de testes de edit question copiamos o teste principal deles e colamos na parte de aixo criando um novo teste e mudamos o nome pra 
+    test('if sync new and removed attachment when editing a question', async () => {
+   
+   mantemos o inicio dele de criar a question criar os attachment 1 e 2 e depois chamar o useCase com 1 e 3 ou seja adicionou o 3 e removeu o 2
+   vamos nomear a chamada para o execute como uma const chamada result
+    e agora nos expects a gente remove os que estão porem esperamos que o resultado seja right e esperamos que la no inmemoryattachments a gente tenha o 1 e o 3 e não tenha o 2. tamem que tenha lenght de 2. sabendo que o length é dois e que la tem os ids 1 e 3 fica obvio que o id2 não existe mais la.
+    fica assim o arquivo de teste:
+    import { InMemoryQuestionsRepository } from 'test/repositories/in-memory-questions-repository'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { makeQuestion } from 'test/factories/make-question'
+import { EditQuestionUseCase } from './edit-question'
+import { UnauthorizedError } from '../../../../core/errors/errors/unauthorized'
+import { InMemoryQuestionAttachmentsRepository } from 'test/repositories/in-memory-question-attachment-repository'
+import { makeQuestionAttachments } from 'test/factories/make-question-attachments'
+
+let inMemoryQuestionsRepository: InMemoryQuestionsRepository
+let inMemoryQuestionsAttachmentRepository: InMemoryQuestionAttachmentsRepository
+let sut: EditQuestionUseCase
+
+describe('edit question', () => {
+  beforeEach(() => {
+    inMemoryQuestionsAttachmentRepository =
+      new InMemoryQuestionAttachmentsRepository()
+    inMemoryQuestionsRepository = new InMemoryQuestionsRepository(
+      inMemoryQuestionsAttachmentRepository,
+    )
+    sut = new EditQuestionUseCase(
+      inMemoryQuestionsRepository,
+      inMemoryQuestionsAttachmentRepository,
+    )
+  })
+
+  test('if can edit a question using id', async () => {
+    const newQuestion = makeQuestion(
+      {
+        authorId: new UniqueEntityId('author-1'),
+      },
+      new UniqueEntityId('question-1'),
+    )
+    await inMemoryQuestionsRepository.create(newQuestion)
+    inMemoryQuestionsAttachmentRepository.items.push(
+      makeQuestionAttachments({
+        questionId: newQuestion.id,
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      makeQuestionAttachments({
+        questionId: newQuestion.id,
+        attachmentId: new UniqueEntityId('2'),
+      }),
+    )
+
+    await sut.execute({
+      questionId: newQuestion.id.toString(),
+      authorId: 'author-1',
+      title: 'new title',
+      content: 'content edited',
+      attachmentIds: ['1', '3'],
+    })
+
+    expect(inMemoryQuestionsRepository.items[0]).toMatchObject({
+      title: 'new title',
+      content: 'content edited',
+    })
+    expect(
+      inMemoryQuestionsRepository.items[0].attachment.currentItems,
+    ).toHaveLength(2)
+    expect(
+      inMemoryQuestionsRepository.items[0].attachment.currentItems,
+    ).toEqual([
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('3'),
+      }),
+    ])
+  })
+
+  test('if cannot edit a question from another user', async () => {
+    const newQuestion = makeQuestion(
+      {
+        authorId: new UniqueEntityId('author-1'),
+      },
+      new UniqueEntityId('question-1'),
+    )
+    await inMemoryQuestionsRepository.create(newQuestion)
+
+    const result = await sut.execute({
+      questionId: newQuestion.id.toString(),
+      authorId: 'author-2',
+      title: 'new title',
+      content: 'content edited',
+      attachmentIds: [],
+    })
+    expect(result.isLeft()).toBe(true)
+    expect(result.value).toBeInstanceOf(UnauthorizedError)
+  })
+  test('if sync new and removed attachment when editing a question', async () => {
+    const newQuestion = makeQuestion(
+      {
+        authorId: new UniqueEntityId('author-1'),
+      },
+      new UniqueEntityId('question-1'),
+    )
+    await inMemoryQuestionsRepository.create(newQuestion)
+    inMemoryQuestionsAttachmentRepository.items.push(
+      makeQuestionAttachments({
+        questionId: newQuestion.id,
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      makeQuestionAttachments({
+        questionId: newQuestion.id,
+        attachmentId: new UniqueEntityId('2'),
+      }),
+    )
+
+    const result = await sut.execute({
+      questionId: newQuestion.id.toString(),
+      authorId: 'author-1',
+      title: 'new title',
+      content: 'content edited',
+      attachmentIds: ['1', '3'],
+    })
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryQuestionsAttachmentRepository.items).toHaveLength(2)
+    expect(inMemoryQuestionsAttachmentRepository.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('1'),
+        }),
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('3'),
+        }),
+      ]),
+    )
+  })
+})
+
+
+agora na camada de dominio a gente ja tem a garantia que estamos criando os attacjhments e persistindo eles junto da criação de questions. porem ainda temos que fazer o mesmo na camada de infra.
+
+
 
 
