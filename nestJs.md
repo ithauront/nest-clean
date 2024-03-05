@@ -10997,7 +10997,348 @@ describe('edit question', () => {
 
 
 agora na camada de dominio a gente ja tem a garantia que estamos criando os attacjhments e persistindo eles junto da criação de questions. porem ainda temos que fazer o mesmo na camada de infra.
+## persistindo anexos no banco de dados
+vamos abrir a camada de infra
+vamos em database prisma repositories e pegamos o prisma questions repository
+e nesse repositorio a gente vai adicionar uma nova dependencia la no constructor que é o repositorio de anexos
+constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+  ) {}
 
+  e agora no create alem de disparar a ciração da question a gente tambme vai disparar a criação no questionAttachments do createMany pegando os attachments que vão vir da question
+    async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+
+    await this.questionAttachments.createMany(question.attachment.getItems())
+  }
+
+  no update a gente tambem vai disparar porem com aquela alteração para o remove ou create
+    async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.update({
+      where: { id: data.id },
+      data,
+    })
+    await this.questionAttachments.createMany(question.attachment.getNewItems())
+    await this.questionAttachments.deleteMany(
+      question.attachment.getRemovedItems(),
+    )
+  }
+  porem agora que estamos na parte de infra a gente tem que se preocupar um pouco mais com performace e ai por exemplo na criação da pergunta a gente não pode rodar simultaneamente a criação da pergunta e do attachment porque precisamos do id da pergunta para os attachments
+  e por outro lado no save a criação e remoção de anexos pode acontecer ao mesmo tempo. então no caso do save a gente usa um await Promisse.all e jogamos as tres coisas la ao mesmo tempo. o create esta certo com o await para cada uma das operações.
+  ele fica assim 
+
+   async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+
+    await Promise.all([
+      this.prisma.question.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.questionAttachments.createMany(question.attachment.getNewItems()),
+      this.questionAttachments.deleteMany(
+        question.attachment.getRemovedItems(),
+      ),
+    ])
+  }
+  e com isso a operação fica mais rapida.
+  a gente poderia fazer transactions dentro do prisma e que ai se um falahar ele continuaria com os outros ou algo assim. o ideal seria sim ser uma transaction porem o prisma não permite transactions que englobem coisas que acontecem em arquivos diferentes
+  e ai teria uma extenção do prisma para resolver isso
+  callback free interactive transactions assim a gente consegue fazer uma transaction dessa forma que poderia chamar em diferentes arquivos. porem isso não é ainda para usar em produçéao então o prisma nos evita de fazer isso em transaction por enquanto.
+  a pagina fica assim:
+  import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+  ) {}
+
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+
+    await this.questionAttachments.createMany(question.attachment.getItems())
+  }
+
+  async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+  }
+
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+
+    await Promise.all([
+      this.prisma.question.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.questionAttachments.createMany(question.attachment.getNewItems()),
+      this.questionAttachments.deleteMany(
+        question.attachment.getRemovedItems(),
+      ),
+    ])
+  }
+}
+
+agora vamos para o prisma question attachment repository e implementamos os dois metodos no create many primeiro a gente verifica se o attachment.mength for iqual a 0 a gente retorna nada assim ele não vai fazer nenhuma operação no banco
+se for maior que zero o que a gente quer fazer néao é criar esses attachments e sim atualizar varios attachments para colocar o id la no anco de dados nos attachments a gente colocando o questionId para fazer o link e ai a gente quer atualizar todos onde o id estiver dentro da lista de attachments e para isso a gente vai fazer um const attachmentIds  que vai ser uma mapeamento de cada attachment retornarnso o attachment.id.tostring
+
+ const attachmentIds = attachments.map((attachment)=> {
+      return attachment.id.toString()
+    })
+
+    e ai a gente vai no prisma updateMany where id in:attachmentId
+
+e ai como todos os attachments vão ter o mesmo questionId pq eles chegam juntos a gente vai pegar o questionId do primeiro e dar to string passando isso no data. 
+porem para melhorar um pouco isso a gente pode ir la no prisma attachment mapper e criar um novo metodo static toPrismaUpdateMany  que vai devolver um prismaAttachmetUpdateManyArgs que é o que ele recebe la no banco de dados O mapper fica 100% associado ao repostiorio então ele não tem que ficar desconectado do prisma. e agora a gente vai mover a nossa logica que a gente fez la no repositorio que estava assim:
+async createMany(attachments: QuestionAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+    const attachmentIds = attachments.map((attachment) => {
+      return attachment.id.toString()
+    })
+
+    await this.prisma.attachment.updateMany({
+      where: {
+        id: { in: attachmentIds },
+      },
+      data: {
+        questionId: attachments[0].questionId.toString(),
+      },
+    })
+  }
+  para dentro do mapper
+  o mapper fica assim:
+  import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+import { Prisma, Attachment as PrismaAttachment } from '@prisma/client'
+
+export class PrismaQuestionAttachmentMapper {
+  static toDomain(raw: PrismaAttachment): QuestionAttachment {
+    if (!raw.questionId) {
+      throw new Error('Invalid attachment type')
+    }
+    return QuestionAttachment.create(
+      {
+        attachmentId: new UniqueEntityId(raw.id),
+        questionId: new UniqueEntityId(raw.questionId),
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    attachments: QuestionAttachment[],
+  ): Prisma.AttachmentUpdateManyArgs {
+    const attachmentIds = attachments.map((attachment) => {
+      return attachment.id.toString()
+    })
+    return {
+      where: {
+        id: { in: attachmentIds },
+      },
+      data: {
+        questionId: attachments[0].questionId.toString(),
+      },
+    }
+  }
+}
+agora a gente volta no repositorio que ficou assim o metodo com as partes arrancadas
+ async createMany(attachments: QuestionAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+  
+
+    await this.prisma.attachment.updateMany({
+    
+    })
+  }
+  e fazemos uma const data para chamar o mapper e passar para ele nossos attachments e ai na chamada para o banco de dados a gente passa esse data
+   fica assim:
+
+  async createMany(attachments: QuestionAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+    const data = PrismaQuestionAttachmentMapper.toPrisma(attachments)
+
+    await this.prisma.attachment.updateMany(data)
+  }
+
+  agra vamos para o metodo delete many
+  a gente vai fazer a mesma verificação de length e deois a gente vai pegar os ids da mesma forma e deposia  gente chama o prisma para deletar many onde o id aparece. o repositorio fica assim:
+  import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionAttachmentMapper } from '../mappers/prisma-question-attachment-mapper'
+
+@Injectable()
+export class PrismaQuestionAttachmentsRepository
+  implements QuestionAttachmentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+
+  async findManyByQuestionId(
+    questionId: string,
+  ): Promise<QuestionAttachment[]> {
+    const questionAttachments = await this.prisma.attachment.findMany({
+      where: { questionId },
+    })
+    return questionAttachments.map(PrismaQuestionAttachmentMapper.toDomain)
+  }
+
+  async createMany(attachments: QuestionAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+    const data = PrismaQuestionAttachmentMapper.toPrisma(attachments)
+
+    await this.prisma.attachment.updateMany(data)
+  }
+
+  async deleteMany(attachments: QuestionAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+    const attachmentIds = attachments.map((attachment) => {
+      return attachment.id.toString()
+    })
+
+    await this.prisma.attachment.deleteMany({
+      where: {
+        id: { in: attachmentIds },
+      },
+    })
+  }
+
+  async deleteManyByQuestionId(questionId: string): Promise<void> {
+    await this.prisma.attachment.deleteMany({
+      where: { questionId },
+    })
+  }
+}
+
+agora a gente so precisa fazer o controller receber os attachments ent#ao vamos la no controller
+vamosn no create-question.controller.ts 
+ena validação do body a gente rrecebe uma lista de attachments que vai ser um array de string que são uuid então vai ser assim:
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  attachments: z.array(z.string().uuid()),
+})
+
+e agora no controller a gente recebe essa lista de attachments e repassa para o caso de uso como sendo attachments id
+ {
+    const { title, content, attachments } = body
+    const userId = user.sub
+
+    const result = await this.createQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: attachments,
+    })
+
+    fica assim o controller
+    import { BadRequestException, Body, Controller, Post } from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { CreateQuestionUseCase } from '@/domain/forum/application/use-cases/create-question'
+
+const createQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  attachments: z.array(z.string().uuid()),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(createQuestionBodySchema)
+
+type CreateQuestionBodySchema = z.infer<typeof createQuestionBodySchema>
+
+@Controller('/questions')
+export class CreateQuestionController {
+  constructor(private createQuestion: CreateQuestionUseCase) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: CreateQuestionBodySchema,
+  ) {
+    const { title, content, attachments } = body
+    const userId = user.sub
+
+    const result = await this.createQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: attachments,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+ainda falta agora ver o teste
 
 
 
