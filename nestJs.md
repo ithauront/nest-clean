@@ -11339,6 +11339,204 @@ export class CreateQuestionController {
 }
 
 ainda falta agora ver o teste
+## teste de criaão de pergunta com anexo
+quando a gente vai criar a pergurta a gente precisa que os nossos anexos ja estejam criados previamente (em um caso real seria meio que vc adiciona os arquivos e so libera o butão de criar a pergunta quando o upload completar.)
+atualmente a gentetem a factory de makequestionattachment qu cria o relacionamento entre a question e a pergunta mas não temos ainda uma factory de attachment para criar o anexo sowinho.
+então vamos em factories e vamos criar um make-attachemnt.ts copiamos o makestudent nele a damos replace e todos os student para ser attachment
+temos que ir la no attachment entity para exportar as attachment porps
+ajustamos a importação do mapper
+e agora o attachment vai ter um title que a gente vai usar o loren slug
+a url a gente tambem vai usar um loren slug 
+ const attachment = Attachment.create(
+    {
+      title: faker.lorem.slug(),
+      url: faker.lorem.slug(),
+      ...override,
+    },
+    id,
+  )
 
+  e no factory que esta abaixo a gente tem que substituir o user por attachment
+  
+    await this.prisma.attachment.create({
+      data: PrismaAttachmentsMapper.toPrisma(attachment),
+    })
+o factory fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { faker } from '@faker-js/faker'
+import {
+  Attachment,
+  AttachmentProps,
+} from '@/domain/forum/enterprise/entities/attachment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { PrismaAttachmentsMapper } from '@/infra/database/prisma/mappers/prisma-attachment-mapper'
+
+export function makeAttachment(
+  override: Partial<AttachmentProps> = {},
+  id?: UniqueEntityId,
+) {
+  const attachment = Attachment.create(
+    {
+      title: faker.lorem.slug(),
+      url: faker.lorem.slug(),
+      ...override,
+    },
+    id,
+  )
+
+  return attachment
+}
+
+@Injectable()
+export class AttachmentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaAttachment(
+    data: Partial<AttachmentProps> = {},
+  ): Promise<Attachment> {
+    const attachment = makeAttachment(data)
+
+    await this.prisma.attachment.create({
+      data: PrismaAttachmentsMapper.toPrisma(attachment),
+    })
+
+    return attachment
+  }
+}
+
+agora voltamos para o teste e vamos instansiar o attachmentFactory com o let, o moduleref e etc. e la no nosso teste mesmo antes de criar a pergunta a gente vai criar dois anexso com o factory lembrando que com o makePrismaAttachment ele ja esta salvando no banco de dados.
+  const attachment1 = await attachmentFactory.makePrismaAttachment()
+    const attachment2 = await attachmentFactory.makePrismaAttachment()
+
+e agora dentro da criação de pergunta a gente vai enviar o id dos dois attachments
+ const response = await request(app.getHttpServer())
+      .post('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Question',
+        content: 'This is the question',
+        attachments: [attachment1.id.toString(), attachment2.id.toString()],
+      })
+
+      e agora a gente tem que saber se o controller esta associando esses ids de anexos que ja foram criados previamente com o id da pergunta.
+      então depois do primeiro expect a gente vai criar uma nova const chamada attachmentOnDatabase para ir no prisma e dar um findMany para verificar quantos attachments existem com o id dessa pergunta e ai a gente faz um expect que seja length 2
+      
+    expect(QuestionOnDatabase).toBeTruthy()
+
+    const attachmentOnDatabase = await prisma.attachment.findMany({
+      where: {
+        questionId: QuestionOnDatabase?.id,
+      },
+    })
+
+    expect(attachmentOnDatabase).toHaveLength(2) 
+
+    porem assim teriamos um erro porque a entidade attachment tem o id dela tambem que ela pode criar se néao for passado e agente cria esse id a cada vez então a gentenão estava pegando o id correto no prismaquestionAttachmentMapper ele fica assim com o ajuste:
+     import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { QuestionAttachment } from '@/domain/forum/enterprise/entities/question-attachment'
+import { Prisma, Attachment as PrismaAttachment } from '@prisma/client'
+
+export class PrismaQuestionAttachmentMapper {
+  static toDomain(raw: PrismaAttachment): QuestionAttachment {
+    if (!raw.questionId) {
+      throw new Error('Invalid attachment type')
+    }
+    return QuestionAttachment.create(
+      {
+        attachmentId: new UniqueEntityId(raw.id),
+        questionId: new UniqueEntityId(raw.questionId),
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    attachments: QuestionAttachment[],
+  ): Prisma.AttachmentUpdateManyArgs {
+    const attachmentIds = attachments.map((attachment) => {
+      return attachment.attachmentId.toString()
+    })
+    return {
+      where: {
+        id: { in: attachmentIds },
+      },
+      data: {
+        questionId: attachments[0].questionId.toString(),
+      },
+    }
+  }
+}
+
+e o teste do create question fica assim e ja passa:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AttachmentFactory } from 'test/factories/make-attachemnt'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Create questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let attachmentFactory: AttachmentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, AttachmentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+
+    studentFactory = moduleRef.get(StudentFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/questions', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const attachment1 = await attachmentFactory.makePrismaAttachment()
+    const attachment2 = await attachmentFactory.makePrismaAttachment()
+
+   const response = await request(app.getHttpServer())
+      .post('/questions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Question',
+        content: 'This is the question',
+        attachments: [attachment1.id.toString(), attachment2.id.toString()],
+      })
+
+    expect(response.statusCode).toBe(201)
+
+    const QuestionOnDatabase = await prisma.question.findFirst({
+      where: {
+        title: 'Question',
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeTruthy()
+
+    const attachmentOnDatabase = await prisma.attachment.findMany({
+      where: {
+        questionId: QuestionOnDatabase?.id,
+      },
+    })
+
+    expect(attachmentOnDatabase).toHaveLength(2)
+  })
+})
 
 
