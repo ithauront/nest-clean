@@ -11539,4 +11539,260 @@ describe('Create questions tests (e2e)', () => {
   })
 })
 
+## edit question with attachment
+vamos no edit question controller e no schema dele vamos fazer o derebimento dos attachments igual
+const editQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  attachments: z.array(z.string().uuid())
+  e vamos pegar ela na função e vamos mandar ela no attachment ids
+   const { title, content, attachments } = body
+    const userId = user.sub
+
+    const result = await this.editQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: attachments,
+      questionId,
+    })
+    a pagina toda fica assim:
+    import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpCode,
+  Param,
+  Put,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { EditQuestionUseCase } from '@/domain/forum/application/use-cases/edit-question'
+
+const editQuestionBodySchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  attachments: z.array(z.string().uuid()),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(editQuestionBodySchema)
+
+type EditQuestionBodySchema = z.infer<typeof editQuestionBodySchema>
+
+@Controller('/questions/:id')
+export class EditQuestionController {
+  constructor(private editQuestion: EditQuestionUseCase) {}
+
+  @Put()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: EditQuestionBodySchema,
+    @Param('id') questionId: string,
+  ) {
+    const { title, content, attachments } = body
+    const userId = user.sub
+
+    const result = await this.editQuestion.execute({
+      title,
+      content,
+      authorId: userId,
+      attachmentIds: attachments,
+      questionId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+agora podemos ir no teste do edit question e vamos instanciar o attachment factory e tambem o questionAttachmentFactory porem como não temos o questionAttachmentFactory a gente vai criar ele no arquivo de make question attachment. copimos uma parte do o makeAttachments e colamos no make-question-attachments.ts
+a parte copiada " essa
+
+@Injectable()
+export class AttachmentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaAttachment(
+    data: Partial<AttachmentProps> = {},
+  ): Promise<Attachment> {
+    const attachment = makeAttachment(data)
+
+    await this.prisma.attachment.create({
+      data: PrismaAttachmentsMapper.toPrisma(attachment),
+    })
+
+    return attachment
+  }
+}
+
+e mudamos o nome para questionAttachmentFactory e importamos as coisas mudamos o metodo para makeprismaquestionattachment ao inves do attachmentProps a gente pega o questionAttachmentProps e devolvemos o questionAttachment e ai usamos o makequestionAttachment para ter um questionAttachment e ai a gente não cria uma nova entrada no banco de dados a gente so atualiza o existente para faer a relação.
+então damos um opdate onde o id é igual ao questionattachment attachmentId e a gente atualiza o questionId dele para ser o questionAttachment.questionId fica assim a pagina toda
+import {
+  QuestionAttachment,
+  QuestionAttachmentProps,
+} from '@/domain/forum/enterprise/entities/question-attachment'
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+
+export function makeQuestionAttachments(
+  override: Partial<QuestionAttachmentProps> = {},
+  id?: UniqueEntityId,
+) {
+  const questionAttachments = QuestionAttachment.create(
+    {
+      questionId: new UniqueEntityId(),
+      attachmentId: new UniqueEntityId(),
+      ...override,
+    },
+    id,
+  )
+
+  return questionAttachments
+}
+
+@Injectable()
+export class QuestionAttachmentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaQuestionAttachment(
+    data: Partial<QuestionAttachmentProps> = {},
+  ): Promise<QuestionAttachment> {
+    const questionAttachment = makeQuestionAttachments(data)
+
+    await this.prisma.attachment.update({
+      where: {
+        id: questionAttachment.attachmentId.toString(),
+      },
+      data: { questionId: questionAttachment.questionId.toString() },
+    })
+
+    return questionAttachment
+  }
+}
+
+agora podemos voltar par ao teste e instanciar o questionAttachmentFactory
+e agora no corpo do teste a gente assim que cria a pergunta a gente ja cria ela com dois anexos e tambem vamos criar o questionAttachmentFactory para criar o relacionamento entre a question e o attachment tanto para o attachment1 quanto para o 2 fica assim:
+   const attachemnt1 = await attachmentFactory.makePrismaAttachment()
+    const attachemnt2 = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachemnt1.id,
+      questionId: question.id,
+    })
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachemnt2.id,
+      questionId: question.id,
+    })
+    vamos colocaf os attachment 1 e 2 antes da criação da pergunta. não muda nada mas é apenas para simular o processo que o usuario vai azer.
+    e agora depois de relacionar os dois attachments a gente vai criar o attachment 3 e agora na requisição a gente vai enviar apenas o id do attachment 1 e 3 assim ele deve manter o um apagar o dois e adicionar o tres
+    agora nos expects a gente pode copiar do create question a parte do attachmentOnDatabase e o expect dele que tem que continuar tendo length 2 e podemos tambem verificar se o attachmentondatabase é um array contendo dois objetos com os ids dos attachment1 e 3 a pagina toda fica assim:
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AttachmentFactory } from 'test/factories/make-attachemnt'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionAttachmentFactory } from 'test/factories/make-question-attachments'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Edit questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let attachmentFactory: AttachmentFactory
+  let questionAttachmentFactory: QuestionAttachmentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AttachmentFactory,
+        QuestionAttachmentFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    questionAttachmentFactory = moduleRef.get(QuestionAttachmentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[Put]/questions/:id', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const attachemnt1 = await attachmentFactory.makePrismaAttachment()
+    const attachemnt2 = await attachmentFactory.makePrismaAttachment()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachemnt1.id,
+      questionId: question.id,
+    })
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachemnt2.id,
+      questionId: question.id,
+    })
+
+    const attachemnt3 = await attachmentFactory.makePrismaAttachment()
+
+    const questionId = question.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .put(`/questions/${questionId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'New Title',
+        content: 'New Content',
+        attachments: [attachemnt1.id.toString(), attachemnt3.id.toString()],
+      })
+
+    expect(response.statusCode).toBe(204)
+
+    const QuestionOnDatabase = await prisma.question.findFirst({
+      where: {
+        title: 'New Title',
+        content: 'New Content',
+      },
+    })
+
+    expect(QuestionOnDatabase).toBeTruthy()
+
+    const attachmentOnDatabase = await prisma.attachment.findMany({
+      where: {
+        questionId: QuestionOnDatabase?.id,
+      },
+    })
+
+    expect(attachmentOnDatabase).toHaveLength(2)
+    expect(attachmentOnDatabase).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: attachemnt1.id.toString() }),
+        expect.objectContaining({ id: attachemnt3.id.toString() }),
+      ]),
+    )
+  })
+})
+
+
 
