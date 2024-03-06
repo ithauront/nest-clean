@@ -46,23 +46,23 @@ describe('Edit questions tests (e2e)', () => {
 
     const accessToken = jwt.sign({ sub: user.id.toString() })
 
-    const attachemnt1 = await attachmentFactory.makePrismaAttachment()
-    const attachemnt2 = await attachmentFactory.makePrismaAttachment()
+    const attachment1 = await attachmentFactory.makePrismaAttachment()
+    const attachment2 = await attachmentFactory.makePrismaAttachment()
 
     const question = await questionFactory.makePrismaQuestion({
       authorId: user.id,
     })
 
     await questionAttachmentFactory.makePrismaQuestionAttachment({
-      attachmentId: attachemnt1.id,
+      attachmentId: attachment1.id,
       questionId: question.id,
     })
     await questionAttachmentFactory.makePrismaQuestionAttachment({
-      attachmentId: attachemnt2.id,
+      attachmentId: attachment2.id,
       questionId: question.id,
     })
 
-    const attachemnt3 = await attachmentFactory.makePrismaAttachment()
+    const attachment3 = await attachmentFactory.makePrismaAttachment()
 
     const questionId = question.id.toString()
 
@@ -72,31 +72,31 @@ describe('Edit questions tests (e2e)', () => {
       .send({
         title: 'New Title',
         content: 'New Content',
-        attachments: [attachemnt1.id.toString(), attachemnt3.id.toString()],
+        attachments: [attachment1.id.toString(), attachment3.id.toString()],
       })
 
     expect(response.statusCode).toBe(204)
 
-    const QuestionOnDatabase = await prisma.question.findFirst({
+    const questionOnDatabase = await prisma.question.findFirst({
       where: {
         title: 'New Title',
         content: 'New Content',
       },
     })
 
-    expect(QuestionOnDatabase).toBeTruthy()
+    expect(questionOnDatabase).toBeTruthy()
 
     const attachmentOnDatabase = await prisma.attachment.findMany({
       where: {
-        questionId: QuestionOnDatabase?.id,
+        questionId: questionOnDatabase?.id,
       },
     })
 
     expect(attachmentOnDatabase).toHaveLength(2)
     expect(attachmentOnDatabase).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: attachemnt1.id.toString() }),
-        expect.objectContaining({ id: attachemnt3.id.toString() }),
+        expect.objectContaining({ id: attachment1.id.toString() }),
+        expect.objectContaining({ id: attachment3.id.toString() }),
       ]),
     )
   })

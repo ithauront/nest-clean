@@ -8,11 +8,15 @@ export class InMemoryAnswersRepository implements AnswersRepository {
   public items: Answer[] = []
 
   constructor(
-    private AnswerAttachmentRepository: AnswerAttachmentsRepository,
+    private answerAttachmentRepository: AnswerAttachmentsRepository,
   ) {}
 
   async create(answer: Answer): Promise<void> {
     this.items.push(answer)
+
+    await this.answerAttachmentRepository.createMany(
+      answer.attachment.getItems(),
+    )
 
     DomainEvents.dispatchEventsForAggregate(answer.id)
   }
@@ -36,13 +40,20 @@ export class InMemoryAnswersRepository implements AnswersRepository {
   async delete(answer: Answer) {
     const itemIndex = this.items.findIndex((item) => item.id === answer.id)
     this.items.splice(itemIndex, 1)
-    this.AnswerAttachmentRepository.deleteManyByAnswerId(answer.id.toString())
+    this.answerAttachmentRepository.deleteManyByAnswerId(answer.id.toString())
   }
 
   async save(answer: Answer) {
     const itemIndex = this.items.findIndex((item) => item.id === answer.id)
 
     this.items[itemIndex] = answer
+
+    await this.answerAttachmentRepository.createMany(
+      answer.attachment.getNewItems(),
+    )
+    await this.answerAttachmentRepository.deleteMany(
+      answer.attachment.getRemovedItems(),
+    )
 
     DomainEvents.dispatchEventsForAggregate(answer.id)
   }

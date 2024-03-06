@@ -50,17 +50,17 @@ describe('Create questions tests (e2e)', () => {
 
     expect(response.statusCode).toBe(201)
 
-    const QuestionOnDatabase = await prisma.question.findFirst({
+    const questionOnDatabase = await prisma.question.findFirst({
       where: {
         title: 'Question',
       },
     })
 
-    expect(QuestionOnDatabase).toBeTruthy()
+    expect(questionOnDatabase).toBeTruthy()
 
     const attachmentOnDatabase = await prisma.attachment.findMany({
       where: {
-        questionId: QuestionOnDatabase?.id,
+        questionId: questionOnDatabase?.id,
       },
     })
 

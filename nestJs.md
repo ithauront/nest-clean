@@ -11794,5 +11794,768 @@ describe('Edit questions tests (e2e)', () => {
   })
 })
 
+# resposta com anexos
+primeiro de tudo vamos la nos repositorios da camada de dominio e vamos fazer s metodos createMany e deleteMany no answers attachment repository e ele fica assim:
+import { AnswerAttachment } from '../../enterprise/entities/answer-attachment'
 
+export abstract class AnswerAttachmentsRepository {
+  abstract createMany(attachments: AnswerAttachment[]): Promise<void>
+  abstract deleteMany(attachments: AnswerAttachment[]): Promise<void>
+  abstract findManyByAnswerId(answerId: string): Promise<AnswerAttachment[]>
+  abstract deleteManyByAnswerId(answerId: string): Promise<void>
+}
+agora vamos no inmemory repository e vamos copiar os metodos que fizemos para o question dentro do answr e trocamos todos os questionAttachment por answer attachment.  fica assim:
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerAttachment } from '@/domain/forum/enterprise/entities/answer-attachment'
+export class InMemoryAnswerAttachmentsRepository
+  implements AnswerAttachmentsRepository
+{
+  public items: AnswerAttachment[] = []
+
+  async findManyByAnswerId(answerId: string) {
+    const answerAttachments = this.items.filter(
+      (item) => item.answerId.toString() === answerId,
+    )
+
+    return answerAttachments
+  }
+
+  async createMany(attachments: AnswerAttachment[]): Promise<void> {
+    this.items.push(...attachments)
+  }
+
+  async deleteMany(attachments: AnswerAttachment[]): Promise<void> {
+    const answerAttachments = this.items.filter((item) => {
+      return !attachments.some((attachment) => attachment.equals(item))
+    })
+    this.items = answerAttachments
+  }
+
+  async deleteManyByAnswerId(answerId: string) {
+    const answerAttachments = this.items.filter(
+      (item) => item.answerId.toString() !== answerId,
+    )
+    this.items = answerAttachments
+  }
+}
+
+
+
+
+e tambem no questionRepository temos ajustes de chamar os metodos dentro do create e do save e tambem de color a dependencia no constructor então tambem fazemos isso a dependencia ja estava feita porem trocamos um erro de digitação que o A estava maisuclo no nome da variavel e depois adicionamos as chamadas no create e save e ajustamos o nome para ser answer fica assim:
+import { DomainEvents } from '@/core/event/domain-events'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { Answer } from '@/domain/forum/enterprise/entities/answer'
+
+export class InMemoryAnswersRepository implements AnswersRepository {
+  public items: Answer[] = []
+
+  constructor(
+    private answerAttachmentRepository: AnswerAttachmentsRepository,
+  ) {}
+
+  async create(answer: Answer): Promise<void> {
+    this.items.push(answer)
+
+    await this.answerAttachmentRepository.createMany(
+      answer.attachment.getItems(),
+    )
+
+    DomainEvents.dispatchEventsForAggregate(answer.id)
+  }
+
+  async findById(id: string) {
+    const answer = this.items.find((item) => item.id.toString() === id)
+    if (!answer) {
+      return null
+    }
+    return answer
+  }
+
+  async findManyByQuestionId(questionId: string, { page }: PaginationParams) {
+    const answers = this.items
+      .filter((item) => item.questionId.toString() === questionId)
+      .slice((page - 1) * 20, page * 20)
+
+    return answers
+  }
+
+  async delete(answer: Answer) {
+    const itemIndex = this.items.findIndex((item) => item.id === answer.id)
+    this.items.splice(itemIndex, 1)
+    this.answerAttachmentRepository.deleteManyByAnswerId(answer.id.toString())
+  }
+
+  async save(answer: Answer) {
+    const itemIndex = this.items.findIndex((item) => item.id === answer.id)
+
+    this.items[itemIndex] = answer
+
+    await this.answerAttachmentRepository.createMany(
+      answer.attachment.getNewItems(),
+    )
+    await this.answerAttachmentRepository.deleteMany(
+      answer.attachment.getRemovedItems(),
+    )
+
+    DomainEvents.dispatchEventsForAggregate(answer.id)
+  }
+}
+
+
+agora podemos ir no caso de uso vamos no teste do create question e temos um teste para testar se ele esta criando os attachments copiamos ele e colamos ele no teste do create answer ajustamos o erro que tinha instructor id no teste que ja estava la e trocamos por author id
+ajustamo o titulo do novo teste e as coisas que passamos na result e se validamos dentro do answersRepository fica assim:
+import { InMemoryAnswersRepository } from 'test/repositories/in-memory-answer-repository'
+import { AnswerQuestionUseCase } from './answer-question'
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { InMemoryAnswerAttachmentsRepository } from 'test/repositories/in-memory-answer-attachment-repository'
+
+let inMemoryAnswersAttachmentRepository: InMemoryAnswerAttachmentsRepository
+let inMemoryAnswersRepository: InMemoryAnswersRepository
+let sut: AnswerQuestionUseCase
+
+describe('create answer for question test', () => {
+  beforeEach(() => {
+    inMemoryAnswersAttachmentRepository =
+      new InMemoryAnswerAttachmentsRepository()
+    inMemoryAnswersRepository = new InMemoryAnswersRepository(
+      inMemoryAnswersAttachmentRepository,
+    )
+    sut = new AnswerQuestionUseCase(inMemoryAnswersRepository)
+  })
+
+  test('if can create an answer', async () => {
+    const result = await sut.execute({
+      questionId: '1',
+      authorId: '1',
+      content: 'this is the answer content',
+      attachmentIds: ['1', '2'],
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(result.value?.answer.content).toEqual('this is the answer content')
+    expect(inMemoryAnswersRepository.items[0]).toEqual(result.value?.answer)
+    expect(
+      inMemoryAnswersRepository.items[0].attachment.currentItems,
+    ).toHaveLength(2)
+    expect(inMemoryAnswersRepository.items[0].attachment.currentItems).toEqual([
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('2'),
+      }),
+    ])
+  })
+  test('if can create an attachment persistence when answer is created', async () => {
+    const result = await sut.execute({
+      authorId: '1',
+      questionId: '1',
+      content: 'this answer',
+      attachmentIds: ['1', '2'],
+    })
+
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryAnswersAttachmentRepository.items).toHaveLength(2)
+    expect(inMemoryAnswersAttachmentRepository.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('1'),
+        }),
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('2'),
+        }),
+      ]),
+    )
+  })
+})
+
+e agora vamos no edit question e temos o teste do sync e vamos colocar esse teste no edit answer.spec ajustamos o titulo do teste  e nele a gente faz o a=make answer e não o make question damos um push usando o maka answerAttachment e mudando para answer as coisas
+e ai no result a gente anda o answerId e tiramos o title  e no expect a gente sa o answerAttachment repository o arquivo fica assim:
+import { InMemoryAnswersRepository } from 'test/repositories/in-memory-answer-repository'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { makeAnswer } from 'test/factories/make-answer'
+import { EditAnswerUseCase } from './edit-answer'
+import { UnauthorizedError } from '../../../../core/errors/errors/unauthorized'
+import { InMemoryAnswerAttachmentsRepository } from 'test/repositories/in-memory-answer-attachment-repository'
+import { makeAnswerAttachments } from 'test/factories/make-answer-attachments'
+
+let inMemoryAnswersRepository: InMemoryAnswersRepository
+let inMemoryAnswersAttachmentRepository: InMemoryAnswerAttachmentsRepository
+let sut: EditAnswerUseCase
+
+describe('edit answer', () => {
+  beforeEach(() => {
+    inMemoryAnswersAttachmentRepository =
+      new InMemoryAnswerAttachmentsRepository()
+    inMemoryAnswersRepository = new InMemoryAnswersRepository(
+      inMemoryAnswersAttachmentRepository,
+    )
+    sut = new EditAnswerUseCase(
+      inMemoryAnswersRepository,
+      inMemoryAnswersAttachmentRepository,
+    )
+  })
+
+  test('if can edit a answer using id', async () => {
+    const newAnswer = makeAnswer(
+      {
+        authorId: new UniqueEntityId('author-1'),
+      },
+      new UniqueEntityId('answer-1'),
+    )
+    await inMemoryAnswersRepository.create(newAnswer)
+    inMemoryAnswersAttachmentRepository.items.push(
+      makeAnswerAttachments({
+        answerId: newAnswer.id,
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      makeAnswerAttachments({
+        answerId: newAnswer.id,
+        attachmentId: new UniqueEntityId('2'),
+      }),
+    )
+
+    await sut.execute({
+      answerId: newAnswer.id.toString(),
+      authorId: 'author-1',
+      content: 'content edited',
+      attachmentIds: ['1', '3'],
+    })
+
+    expect(inMemoryAnswersRepository.items[0]).toMatchObject({
+      content: 'content edited',
+    })
+    expect(
+      inMemoryAnswersRepository.items[0].attachment.currentItems,
+    ).toHaveLength(2)
+    expect(inMemoryAnswersRepository.items[0].attachment.currentItems).toEqual([
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      expect.objectContaining({
+        attachmentId: new UniqueEntityId('3'),
+      }),
+    ])
+  })
+
+  test('if cannot edit a answer from another user', async () => {
+    const newAnswer = makeAnswer(
+      {
+        authorId: new UniqueEntityId('author-1'),
+      },
+      new UniqueEntityId('answer-1'),
+    )
+    await inMemoryAnswersRepository.create(newAnswer)
+    const result = await sut.execute({
+      answerId: newAnswer.id.toString(),
+      authorId: 'author-2',
+      content: 'content edited',
+      attachmentIds: [],
+    })
+    expect(result.isLeft()).toBe(true)
+    expect(result.value).toBeInstanceOf(UnauthorizedError)
+  })
+
+  test('if sync new and removed attachment when editing a answer', async () => {
+    const newAnswer = makeAnswer(
+      {
+        authorId: new UniqueEntityId('author-1'),
+      },
+      new UniqueEntityId('question-1'),
+    )
+    await inMemoryAnswersRepository.create(newAnswer)
+
+    inMemoryAnswersAttachmentRepository.items.push(
+      makeAnswerAttachments({
+        answerId: newAnswer.id,
+        attachmentId: new UniqueEntityId('1'),
+      }),
+      makeAnswerAttachments({
+        answerId: newAnswer.id,
+        attachmentId: new UniqueEntityId('2'),
+      }),
+    )
+
+    const result = await sut.execute({
+      answerId: newAnswer.id.toString(),
+      authorId: 'author-1',
+      content: 'content edited',
+      attachmentIds: ['1', '3'],
+    })
+    expect(result.isRight()).toBe(true)
+    expect(inMemoryAnswersAttachmentRepository.items).toHaveLength(2)
+    expect(inMemoryAnswersAttachmentRepository.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('1'),
+        }),
+        expect.objectContaining({
+          attachmentId: new UniqueEntityId('3'),
+        }),
+      ]),
+    )
+  })
+})
+
+e ai com isso a gente pode rodar os testes unit para ver se esta funcionando. e depois vamos para a parte de infra vamoslogo nos mappers e copiamos o metodo que adcionamos do mapper do questionAttachent e colamos no mapper para answer attachments e ajustamos as modificações e importações o mapper fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { AnswerAttachment } from '@/domain/forum/enterprise/entities/answer-attachment'
+import { Prisma, Attachment as PrismaAttachment } from '@prisma/client'
+
+export class PrismaAnswerAttachmentMapper {
+  static toDomain(raw: PrismaAttachment): AnswerAttachment {
+    if (!raw.answerId) {
+      throw new Error('Invalid attachment type')
+    }
+    return AnswerAttachment.create(
+      {
+        attachmentId: new UniqueEntityId(raw.id),
+        answerId: new UniqueEntityId(raw.answerId),
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    attachments: AnswerAttachment[],
+  ): Prisma.AttachmentUpdateManyArgs {
+    const attachmentIds = attachments.map((attachment) => {
+      return attachment.attachmentId.toString()
+    })
+    return {
+      where: {
+        id: { in: attachmentIds },
+      },
+      data: {
+        answerId: attachments[0].answerId.toString(),
+      },
+    }
+  }
+}
+
+agora vamos no prisma answer repository e vamos colocar a dependencia igual a gente fez no questions
+  constructor(
+    private prisma: PrismaService,
+    private answerAttachmentsRepository: AnswerAttachmentsRepository,
+  ) {} 
+  agora vamos no metodo create dele e colamos a mesma coisa que adicionamos no metodo create do questions repository
+   async create(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+    await this.prisma.answer.create({
+      data,
+    })
+
+    await this.answerAttachmentsRepository.createMany(
+      answer.attachment.getItems(),
+    )
+  }
+  e no metodo save a gente faz o promisse all
+o arquivo fica assim:import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { Answer } from '@/domain/forum/enterprise/entities/answer'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerMapper } from '../mappers/prisma-answer-mapper'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+
+@Injectable()
+export class PrismaAnswersRepository implements AnswersRepository {
+  constructor(
+    private prisma: PrismaService,
+    private answerAttachmentsRepository: AnswerAttachmentsRepository,
+  ) {}
+
+  async findById(id: string): Promise<Answer | null> {
+    const answer = await this.prisma.answer.findUnique({
+      where: {
+        id,
+      },
+    })
+    if (!answer) {
+      return null
+    }
+
+    return PrismaAnswerMapper.toDomain(answer)
+  }
+
+  async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<Answer[]> {
+    const answer = await this.prisma.answer.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answer.map(PrismaAnswerMapper.toDomain)
+  }
+
+  async create(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+    await this.prisma.answer.create({
+      data,
+    })
+
+    await this.answerAttachmentsRepository.createMany(
+      answer.attachment.getItems(),
+    )
+  }
+
+  async delete(answer: Answer): Promise<void> {
+    await this.prisma.answer.delete({ where: { id: answer.id.toString() } })
+  }
+
+  async save(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+
+    await Promise.all([
+      await this.prisma.answer.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.answerAttachmentsRepository.createMany(
+        answer.attachment.getNewItems(),
+      ),
+      this.answerAttachmentsRepository.deleteMany(
+        answer.attachment.getRemovedItems(),
+      ),
+    ])
+  }
+}
+
+
+  agora a gente vai no questionattachmentrepositoy e copia o metodo create many e delete many e jogamos eles no answerAttachment repositorye substituimos questiion attachment por answer attachment fica assim:
+  import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerAttachment } from '@/domain/forum/enterprise/entities/answer-attachment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerAttachmentMapper } from '../mappers/prisma-answer-attachment-mapper'
+
+@Injectable()
+export class PrismaAnswerAttachmentsRepository
+  implements AnswerAttachmentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+
+  async findManyByAnswerId(answerId: string): Promise<AnswerAttachment[]> {
+    const answerAttachments = await this.prisma.attachment.findMany({
+      where: { answerId },
+    })
+    return answerAttachments.map(PrismaAnswerAttachmentMapper.toDomain)
+  }
+
+  async deleteManyByAnswerId(answerId: string): Promise<void> {
+    await this.prisma.attachment.deleteMany({
+      where: { answerId },
+    })
+  }
+
+  async createMany(attachments: AnswerAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+    const data = PrismaAnswerAttachmentMapper.toPrisma(attachments)
+
+    await this.prisma.attachment.updateMany(data)
+  }
+
+  async deleteMany(attachments: AnswerAttachment[]): Promise<void> {
+    if (attachments.length === 0) {
+      return
+    }
+    const attachmentIds = attachments.map((attachment) => {
+      return attachment.id.toString()
+    })
+
+    await this.prisma.attachment.deleteMany({
+      where: {
+        id: { in: attachmentIds },
+      },
+    })
+  }
+}
+
+agora o que precisamos mudar é o controller vamos no answer question controller e vamos receber uma lista de attachments
+const answerQuestionBodySchema = z.object({
+  content: z.string(),
+  attachments: z.array(z.string().uuid()),
+}) e agora a gente pega a lista de attachments do body e passa ela para o usecase fica assim:
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { AnswerQuestionUseCase } from '@/domain/forum/application/use-cases/answer-question'
+
+const answerQuestionBodySchema = z.object({
+  content: z.string(),
+  attachments: z.array(z.string().uuid()),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(answerQuestionBodySchema)
+
+type AnswerQuestionBodySchema = z.infer<typeof answerQuestionBodySchema>
+
+@Controller('/questions/:questionId/answers')
+export class AnswerQuestionController {
+  constructor(private answerQuestion: AnswerQuestionUseCase) {}
+
+  @Post()
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('questionId') questionId: string,
+    @Body(bodyValidationPipe) body: AnswerQuestionBodySchema,
+  ) {
+    const { content, attachments } = body
+    const userId = user.sub
+
+    const result = await this.answerQuestion.execute({
+      questionId,
+      content,
+      authorId: userId,
+      attachmentIds: attachments,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+e fazemos logo a mesma coisa no edit answer.
+ele fica assim:
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpCode,
+  Param,
+  Put,
+} from '@nestjs/common'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { EditAnswerUseCase } from '@/domain/forum/application/use-cases/edit-answer'
+
+const editAnswerBodySchema = z.object({
+  content: z.string(),
+  attachments: z.array(z.string().uuid()),
+})
+
+const bodyValidationPipe = new ZodValidationPipe(editAnswerBodySchema)
+
+type EditAnswerBodySchema = z.infer<typeof editAnswerBodySchema>
+
+@Controller('/answers/:id')
+export class EditAnswerController {
+  constructor(private editAnswer: EditAnswerUseCase) {}
+
+  @Put()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Body(bodyValidationPipe) body: EditAnswerBodySchema,
+    @Param('id') answerId: string,
+  ) {
+    const { content, attachments } = body
+    const userId = user.sub
+
+    const result = await this.editAnswer.execute({
+      content,
+      authorId: userId,
+      attachmentIds: attachments,
+      answerId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+agora vamos atualizar os testes
+vamos mudar as factories e copiamos o metodo que esta injectable no make question attachments e coamos ele no make answer attachments o factor fica assim do make answer attachments
+import {
+  AnswerAttachment,
+  AnswerAttachmentProps,
+} from '@/domain/forum/enterprise/entities/answer-attachment'
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+
+export function makeAnswerAttachments(
+  override: Partial<AnswerAttachmentProps> = {},
+  id?: UniqueEntityId,
+) {
+  const answerAttachments = AnswerAttachment.create(
+    {
+      answerId: new UniqueEntityId(),
+      attachmentId: new UniqueEntityId(),
+      ...override,
+    },
+    id,
+  )
+
+  return answerAttachments
+}
+
+@Injectable()
+export class AnswerAttachmentFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaAnswerAttachment(
+    data: Partial<AnswerAttachmentProps> = {},
+  ): Promise<AnswerAttachment> {
+    const answerAttachment = makeAnswerAttachments(data)
+
+    await this.prisma.attachment.update({
+      where: {
+        id: answerAttachment.attachmentId.toString(),
+      },
+      data: { answerId: answerAttachment.answerId.toString() },
+    })
+
+    return answerAttachment
+  }
+}
+
+agora vamos para o teste do answer question e instanciamos o attachment factory
+e agora dentro do teste a gente cria a question como estavamos fazendo e para criar a resposta com attachment antes dela a gente cria os dois attachments
+
+    const attachment1 = await attachmentFactory.makePrismaAttachment()
+    const attachment2 = await attachmentFactory.makePrismaAttachment()
+    e agora na lista de attachments a gente passa o id dos dois
+    
+    const response = await request(app.getHttpServer())
+      .post(`/questions/${questionId}/answers`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New Answer',
+        attachments: [attachment1.id.toString(), attachment2.id.toString()],
+      })
+      e vamos checar pelo banco de dados se eles foram salvos.
+      fica assim o teste todo
+      import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AttachmentFactory } from 'test/factories/make-attachemnt'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Answer questions tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let attachmentFactory: AttachmentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AttachmentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[POST]/questions/:questionId/answers', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    const attachment1 = await attachmentFactory.makePrismaAttachment()
+    const attachment2 = await attachmentFactory.makePrismaAttachment()
+
+    const response = await request(app.getHttpServer())
+      .post(`/questions/${questionId}/answers`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New Answer',
+        attachments: [attachment1.id.toString(), attachment2.id.toString()],
+      })
+
+    expect(response.statusCode).toBe(201)
+
+    const answerOnDatabase = await prisma.answer.findFirst({
+      where: {
+        content: 'New Answer',
+      },
+    })
+
+    expect(answerOnDatabase).toBeTruthy()
+
+    const attachmentOnDatabase = await prisma.attachment.findMany({
+      where: {
+        answerId: answerOnDatabase?.id,
+      },
+    })
+
+    expect(attachmentOnDatabase).toHaveLength(2)
+  })
+})
+
+com essas alterações vai dar erro no teste de edit porque agora a gente falou no controller dele que precisa de uma lista de attachment. para previnir isso a gente pode no schema dele passar um default como array vazio assim:
+
+const editAnswerBodySchema = z.object({
+  content: z.string(),
+  attachments: z.array(z.string().uuid()).default([]),
+})
+agora para terminar a gente vai no teste de edit answer e instanciar o attachmentfactory e o answer attachment factory e ai no teste apos criar uma resposta a gente ja associa alguns anexos a essa resposta assim:
+    const answer = await answerFactory.makePrismaAnswer({
+      questionId: question.id,
+      authorId: user.id,
+    })
+    const attachment1 = await attachmentFactory.makePrismaAttachment()
+    const attachment2 = await attachmentFactory.makePrismaAttachment()
+
+    await answerAttachmentFactory.makePrismaAnswerAttachment({
+      attachmentId: attachment1.id,
+      answerId: answer.id,
+    })
+    await answerAttachmentFactory.makePrismaAnswerAttachment({
+      attachmentId: attachment2.id,
+      answerId: answer.id,
+    })
+
+agora temos uma resposta criada com dois anexos e vamos editar ela para um terceiro anexo e deletar o dois
+então criamos o attachment3 logo depois e na edição a gente passa o id do primeiro e do terceiro attachment
+  const response = await request(app.getHttpServer())
+      .put(`/answers/${answerId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New edited Answer',
+        attachments: [attachment1.id.toString(), attachment3.id.toString()],
+      })
+
+      agora para a verificação a gente pode ir no edit question controller spec e copiar o attachment on database e sua verificaçõa e colar nesse
 
