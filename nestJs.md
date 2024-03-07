@@ -12558,4 +12558,143 @@ então criamos o attachment3 logo depois e na edição a gente passa o id do pri
       })
 
       agora para a verificação a gente pode ir no edit question controller spec e copiar o attachment on database e sua verificaçõa e colar nesse
+    
+## dados relacionados com a api rest
+pensando em nossa aplicação que é um forum em um forum geralmente temos uma listagem de perguntas e todas as perguntas ja vem com os dados do autor da pergunta e a nossa rota de listagem de perguntas não faz isso ainda e por mais que o front end tenha acesso ao id do autor é inviavel para o front end fazer uma requisição ao back para receber as informações do autor com o id para cada uma das pergutas o ideal é isso vir pronto do backend 
+e quando abrimos uma pergunta a gente começa a ter um pouco mais de opção porque agora não estamos mais lidando com uma listagem inteira e sim apenas com uma pergunta e suas respostas anexos e etc ~então nessa unica pergunta a gente pode ja trazer a pergunta, os dados do autor porem nã é idial ja trazer os dados de todas as respostas dessa pergunta; o ideal é dividir isso em duas requisições e a requisicao quze vai trazer os dados da resposta da pergunta pode trazer dados do autor dessa resposta e alguns comentarios dessa resposta e um, butéao para carregar mais comentarios.
+em outras palavras a gente não esta usando graphql mas a gente tem que entender o motivo por qual ele surgiu e as limitações ao usar o rest que estamos usando. os dois principas problemans do rest é overfetching e underfetching
+se a gente na requisição da pergunta ja trazer as respostas como é que a gente vai fazer quando a gente quiser apenas a pergunta sem as respostas? não vai ter, vamos ter que filtrar porque teriamos uma rota que retorna tudo. isso é ruim porque isso vai somando na quantidade de bytes enviados na comunicação e faz mais processamento e fica mais lento.
+o underfetch seria microrotas que não vao ter muitas coisas e ai teriamos que fazer diversas requisições para poder fazer uma coisa. 
+então o que vamos fazer na nossa aplicação. vamos começar fazendo que na listagem de perguntas a gente ja tenha os dados do autor da pergunta. assim como a listagem de respostas e o comentario tambem ou seja tres rotas que vao vir com uma informação provionda de um relacionamento.
+e tambem no caso de get question by slug alem de retornar os dados da pergunta ele vai retornar tambem os do autor e do anexo. 
+## value object com comentario do autor
+por enquanto nos nossos repositorios de contratos a gente pode ver que os metodos sempre retornam entidades pore exemplo 
+  abstract findBySlug(slug: string): Promise<Questions | null>
+  porem agora que a gente viu essa questão de relacionamento com api rest a gente quer que se retorne dados de diersas entidades de uma vez
+  então vamos ter estruturas de dados que são compostas por diversas entidades e elas não são estruturas que a gente pode representar como tabelas de banco porque els ficam salvas em diversas tabelas de bancos.
+  a forma de representar essas estruturas de dados saindo da caixa de entidade é porque entidade é o que a gente consegue identificar de forma individual, ou seja o que tem id unico. então se temos uma listagem de pergunta e que vai trazer tambem autor não vai ter id unico vai tero id da pergunta e do autor.
+  para isso a gente vai usar o value object o value object é uma classe em que a gente identifica a individualidade dessa classe de acordo com o valor de suas propriedades ou seja ao inves de usar o id a gente vai usar as propriedades como o name ou algo assim. então se a gente quer listar perguntas com autores a gente vai identificar isso usando value object.
+  então como vamos ter varios value objects agora na apliação a gente vai criar uma classe root para ele tambem. vamos copiar a classe root de entity que fica em core/entities.entity.ts
+  e vamos colar no arquivo novo que vamos fazer nessa pasta core entities chamado value-object.ts
+não tem problema se os outros values objects que a gente ja tinha não implementaresm essa entidade.
+então no codigo que a gete colou no value-object.ts a gente ja vai retirar toda referencia a id porque eles néao tem id e no metodo equals que a gente usa para verificar se uma value object e igual a outra value object nos néoa temos o id então vamos ter que comparar um a outro de acordo com suas propriedaes então vamos fazer o if o value object for igual a null ou undefined a fgente retorna false
+  if (valueObject === null || valueObject === undefined) {
+      return false
+    }
 
+    se as propriedades do value object que estamos recebendo forem undefined a gente retorna false tamvem porque nesse caso ele não passou pelo metodo constructor porque o constructor define as props
+    if (valueObject.props === undefined) {
+      return false
+    }
+
+mas isso é so para evitar erros porque a real comparação vem agora. comparando uma classe a outra com vbase no valor de suas propriedades é interessante saber que se a gente tiver esses dois objetos
+{
+  name: 'iuri'
+}
+{
+  name: 'iuri'
+}
+e a gente comparar eles com === ele vai dar false dizendo que não são iguais, porque o === não compara os valores e sim se eles ocupam o mesmo espaço na memoria. e nesse caso como tem dois objetos eles não iréao ocupar o mesmo mugar.
+então para comparar os valores a gente precisa converter os props deles em um texto por exemplo ou alguma estrutira de dados que permita comparar somente o valor, entao a gente vai jogar o valueObject.props dentro de um JSON.stringfy()
+o metodo fica assim:
+
+  public equals(valueObject: ValueObject<unknown>) {
+    if (valueObject === null || valueObject === undefined) {
+      return false
+    }
+
+    if (valueObject.props === undefined) {
+      return false
+    }
+
+    return JSON.stringify(valueObject.props) === JSON.stringify(this.props)
+  }
+  sendo assim se bater nesse ultimo como igual ele retorna true se não ele retorna false
+  com isso a nossa clsse base de value object fica assim:
+  export abstract class ValueObject<Props> {
+  protected props: Props
+
+  protected constructor(props: Props) {
+    this.props = props
+  }
+
+  public equals(valueObject: ValueObject<unknown>) {
+    if (valueObject === null || valueObject === undefined) {
+      return false
+    }
+
+    if (valueObject.props === undefined) {
+      return false
+    }
+
+    return JSON.stringify(valueObject.props) === JSON.stringify(this.props)
+  }
+}
+
+e agora podemos ir na pasta de entitys no entreprise e na pasta de value object a gente pode criar o primeiro value object que vai ser de comentario com autor.
+vamos partir para evitar mais o overfetching do que o underfetching. 
+o comentario pode ter varios relcionamentos. mas aqui a gente vai trazer so o relacionamento do comentario com author. vamos começr da menor fatia possivel e ir aumentando no futuro se necessario.
+o value object vai se chamar comment-with-author.ts
+e vai ser uma classe que vai extender o valueobject que a gente acabou de criar
+e nela vamos criar uma interface comment with author props e nela vamos falar quais infiormações vamos transicionar. não podemos desconectar da comunicação backend e front porque isso é uma coisa para a necessidade do front então vamos pensar em quais informações vamos passar para o front. entéao vamos trazer o id do comentario. e não vamos colocar apenas id porque o valueobject não tem id
+ele não tem identidade principal; ele tem ul aglomerado de coisas e cada uma com seu importancia
+vamos colocar o conteudo do comentario. vamos colocar o nome do autor o id do author a data em que o comentario foi criado e a data de update
+export interface CommentWithAuthorProps {
+  commentId: string
+  content: string
+  authorId: string
+  author: string
+  createdAt: Date
+  updatedAt: Date | null
+} 
+
+e agora passamos no value object essas props e agora a gente vai fazer um metodo create porque o constructor do value object que a gente esta extendendo é protected etão ele não é acessivel. e esse metodo create vai receber as props e dar um new commentwithautor passando as props
+  static create(props: CommentWithAuthorProps) {
+    new CommentWithAuthor(props)
+  }
+  é melhor assim do que usando o construtor porque agora a gente pode fazer tipos de validação antes de criar e tambem vamos criar metodos getters para todos os campos que emos dentro desa classe
+  se a gente não fizer o metodo get quando a gente quiser serializar essa classe ou seja transformar ela em json para enviar para o frontend a informação que não
+estiver com get néao vai vir.
+o value object fica assim:
+import { ValueObject } from '@/core/entities/value-object'
+
+export interface CommentWithAuthorProps {
+  commentId: string
+  content: string
+  authorId: string
+  author: string
+  createdAt: Date
+  updatedAt: Date | null
+}
+export class CommentWithAuthor extends ValueObject<CommentWithAuthorProps> {
+  get commentId() {
+    return this.props.commentId
+  }
+
+  get content() {
+    return this.props.content
+  }
+
+  get authorId() {
+    return this.props.authorId
+  }
+
+  get author() {
+    return this.props.author
+  }
+
+  get createdAt() {
+    return this.props.createdAt
+  }
+
+  get updatedAt() {
+    return this.props.updatedAt
+  }
+
+  static create(props: CommentWithAuthorProps) {
+    new CommentWithAuthor(props)
+  }
+}
+
+
+agora o que a gete precisa é que nos usecase que dão fetch nos comments ao invez deles retornarem um array com a entidade questionComment ou com a entidade answerComment eles retornem um array com o valueObject commentwithauthor.
