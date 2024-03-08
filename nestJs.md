@@ -12698,3 +12698,504 @@ export class CommentWithAuthor extends ValueObject<CommentWithAuthorProps> {
 
 
 agora o que a gete precisa é que nos usecase que dão fetch nos comments ao invez deles retornarem um array com a entidade questionComment ou com a entidade answerComment eles retornem um array com o valueObject commentwithauthor.
+
+## listando o comentario com autor
+agora se a gente vai no nosso question-comment-repository.ts  gente vai acha por exemplo o metodo findById mas ele não vai funcionar para a gente porque o value object néao tem id
+ele serve mais para garantir que o comentario existe quando a gente for editar criar ou apagar.
+o que nos queremos fazer é ter uma listagem de comentarios com o autor e o comentario
+e isso é feito no findManyByQuestionId porem para não deletarmos nada a gente vai duplicar ele e chamad de findManyByQuestionIdWithAuthor e a estrutura do metodo vai ser a mesma porem ele não vai devolver uma lista de comments e sim de comments withauthor
+  abstract findManyByQuestionIdWithAuthor(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<CommentWithAuthor[]>
+
+a pagina fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionComment } from '../../enterprise/entities/question-comment'
+import { CommentWithAuthor } from '../../enterprise/entities/value-objects/comment-with-author'
+
+export abstract class QuestionCommentsRepository {
+  abstract findById(id: string): Promise<QuestionComment | null>
+  abstract findManyByQuestionId(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<QuestionComment[]>
+
+  abstract findManyByQuestionIdWithAuthor(
+    questionId: string,
+    params: PaginationParams,
+  ): Promise<CommentWithAuthor[]>
+
+  abstract create(questionComment: QuestionComment): Promise<void>
+  abstract delete(questionComment: QuestionComment): Promise<void>
+}
+
+agora a gente vai acarretar que a gente vai ter que modificar os nossos repositorios e como estamos nacamada de dominoo vamos começar no repositorio in memory que esta la em tests e la a gente duplica  metodo findManyByquestionId e mudamos o nome dele para o nome do withauthor
+e ai vai dar erro porque ele retorna uma listagem de entidades e não é isso que o metodo espera.
+então para ter cesso ao autor de uma pergunta a gente vai precisar ter acesso ao repositorio onde estão guardados os usuarios.
+dentro do questionComments não tem como a gente pegar dados do autor a gente so tem o id mas não vai poder pegar o nome. entõa quando a gente precisa de informação que vem de um otro lugar a gente vai fazer uma injeção de dependecia
+ e uma dica é que sempre que a gente esta lidando na camada do inMemoryRepository todos os outros repositorios que a gente receber tambem é bom usarmos do inmemory então a gente vai pegar o studentsRepository mas la do inMemoryStudends repostiry
+ então fazemos ul constructor privete student repository
+ 
+  constructor(private studentsRepository: InMemoryStudentsRepository) {}
+porque usando o inmemory a gente tem acesso aos itens e com os itens a gente tem acesso a todos os usuarios de la e assim a gente pode procurar o id deles.
+e agora o que a gente faz é no nosso metodo de withAutor a gente
+const questionComments = this.items
+      .filter((item) => item.questionId.toString() === questionId)
+      .slice((page - 1) * 20, page * 20)
+      nisso a gente vai adicionar um map e nesse map a gente vai retornar um comment qiwhtAuthor . create assim vamos criar um e so disso não precisa nem criar nada mas a assinatura do metodo ja para de dar erro porque ele entende que o que ele esta devolvendo um commentwithautor como o nosso contrato pede.
+  agora vamos preencher os dados desse commentWithAuthor. os que a gente ja tem são: onteudo, o id, a data de criação e de atualização .
+  vamos voltar la pra o valueObject do props do commentWithAuthor e mudar o commentId de string para unique entityId e no authorId tambem e botamos o update como opcional.
+export interface CommentWithAuthorProps {
+  commentId: UniqueEntityId
+  content: string
+  authorId: UniqueEntityId
+  author: string
+  createdAt: Date
+  updatedAt?: Date | null
+}
+
+assim a const fica assim:
+ const questionComments = this.items
+      .filter((item) => item.questionId.toString() === questionId)
+      .slice((page - 1) * 20, page * 20)
+      .map((comment) => {
+        return CommentWithAuthor.create({
+          commentId: comment.id,
+          content: comment.content,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+        })
+      })
+
+  agora temos que colocar as informaçéoes do autor
+  o authorId a gente ate pega do comment.authorId
+  mas para o author que seria o nome a gente vai ter que manipular antes do return mas dentro do map a gente vai fazer a cosnt author ser uma chamada para o strundets repository itens.find assim vamos encontrar um aluno
+  onde o id desse aluno seja igual ( e para isso vamos usar o metodo equals, a gente poderia usar tambem o to string e fazer uma comparação mas nesse caso vamos usar o equals que é o metodo do nosos unique entity id)
+  que seja igual ao comment.authorid assiù
+    const author = this.studentsRepository.items.find((student) => {
+          return student.id.equals(comment.authorId)
+        })
+        dessa forma o author pode ser um student ou um undefined porque esse metodo pode sempreretonrar um undefined caso algo ai esteja vazio. então a gente vai lançar um erro caso o autor não exista. como é apenas para teste podemos jogar um erro mais generico mesmo porque o inmemory so roda nos testes.
+        agora a gente pode passar como author o author.name e fica certo
+  na commentWithAuthor value object estava faltando o return no metoo creta por isso dava erro a pagina correta é assim:
+  import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { ValueObject } from '@/core/entities/value-object'
+
+export interface CommentWithAuthorProps {
+  commentId: UniqueEntityId
+  content: string
+  authorId: UniqueEntityId
+  author: string
+  createdAt: Date
+  updatedAt?: Date | null
+}
+export class CommentWithAuthor extends ValueObject<CommentWithAuthorProps> {
+  get commentId() {
+    return this.props.commentId
+  }
+
+  get content() {
+    return this.props.content
+  }
+
+  get authorId() {
+    return this.props.authorId
+  }
+
+  get author() {
+    return this.props.author
+  }
+
+  get createdAt() {
+    return this.props.createdAt
+  }
+
+  get updatedAt() {
+    return this.props.updatedAt
+  }
+
+  static create(props: CommentWithAuthorProps) {
+    return new CommentWithAuthor(props)
+  }
+}
+
+e agora o in memory repository fica certo dessa forma;
+import { DomainEvents } from '@/core/event/domain-events'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { QuestionComment } from '@/domain/forum/enterprise/entities/question-comment'
+import { InMemoryStudentsRepository } from './in-memory-students-repository'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+
+export class InMemoryQuestionCommentsRepository
+  implements QuestionCommentsRepository
+{
+  public items: QuestionComment[] = []
+
+  constructor(private studentsRepository: InMemoryStudentsRepository) {}
+
+  async findById(id: string) {
+    const questionComment = this.items.find((item) => item.id.toString() === id)
+    if (!questionComment) {
+      return null
+    }
+    return questionComment
+  }
+
+  async findManyByQuestionId(questionId: string, { page }: PaginationParams) {
+    const questionComments = this.items
+      .filter((item) => item.questionId.toString() === questionId)
+      .slice((page - 1) * 20, page * 20)
+
+    return questionComments
+  }
+
+  async findManyByQuestionIdWithAuthor(
+    questionId: string,
+    { page }: PaginationParams,
+  ) {
+    const questionComments = this.items
+      .filter((item) => item.questionId.toString() === questionId)
+      .slice((page - 1) * 20, page * 20)
+      .map((comment) => {
+        const author = this.studentsRepository.items.find((student) => {
+          return student.id.equals(comment.authorId)
+        })
+
+        if (!author) {
+          throw new Error(`Author with ID ${comment.authorId} does not exists`)
+        }
+
+        return CommentWithAuthor.create({
+          commentId: comment.id,
+          content: comment.content,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+          authorId: comment.authorId,
+          author: author.name,
+        })
+      })
+
+    return questionComments
+  }
+
+  async create(questionComment: QuestionComment) {
+    this.items.push(questionComment)
+
+    DomainEvents.dispatchEventsForAggregate(questionComment.id)
+  }
+
+  async delete(questionComment: QuestionComment) {
+    const itemIndex = this.items.findIndex(
+      (item) => item.id === questionComment.id,
+    )
+    await this.items.splice(itemIndex, 1)
+  }
+}
+ e criamos um metodo que retorna tanto as infos do comentario quando to autor.
+ agora podemos ir no caso de uso onde listamos os questionComments e vamos mudar o retorno de para commentsWithAuthro na list questionComents
+ interface ListQuestionCommentsUseCaseRequest {
+  questionId: string
+  page: number
+}
+type ListQuestionCommentsUseCaseResponse = Either<
+  null,
+  {
+    comments: CommentWithAuthor[]
+  }
+>
+e mudamos o metodo para o findManywithauthor e muamos o retorno para comments e a const tambm fica assim a pagina 
+import { Either, right } from '@/core/either'
+import { QuestionCommentsRepository } from '../repositories/question-comments-repository'
+import { Injectable } from '@nestjs/common'
+import { CommentWithAuthor } from '../../enterprise/entities/value-objects/comment-with-author'
+
+interface ListQuestionCommentsUseCaseRequest {
+  questionId: string
+  page: number
+}
+type ListQuestionCommentsUseCaseResponse = Either<
+  null,
+  {
+    comments: CommentWithAuthor[]
+  }
+>
+
+@Injectable()
+export class ListQuestionCommentsUseCase {
+  constructor(private questionCommentsRepository: QuestionCommentsRepository) {}
+
+  async execute({
+    page,
+    questionId,
+  }: ListQuestionCommentsUseCaseRequest): Promise<ListQuestionCommentsUseCaseResponse> {
+    const comments =
+      await this.questionCommentsRepository.findManyByQuestionIdWithAuthor(
+        questionId,
+        {
+          page,
+        },
+      )
+
+    return right({ comments })
+  }
+}
+
+agora vamos para o test desse use case e o inmemory uestion comments agora tem uma dependencia
+o students repository para isso a gente vai instanciar esse repositorio e passamos a dependencia
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryQuestionCommentsRepository: InMemoryQuestionCommentsRepository
+let sut: ListQuestionCommentsUseCase
+
+describe('list recent questioncomments test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryQuestionCommentsRepository = new InMemoryQuestionCommentsRepository(
+      inMemoryStudentsRepository,
+    )
+    sut = new ListQuestionCommentsUseCase(inMemoryQuestionCommentsRepository)
+  })
+  e agora em cada teste a gente não pode mais fazer comentario sem associar eles a um student que existe. ent éao a gente tem que criar um student antes dos comentarios e tambem adicionamos ele no repositorio com o itens . push ou com o create . a gente vai colocar o nome jhon doe para a gente poderverificar o nome depois.
+
+    const student = makeStudent({ name: 'Jhon Doe' })
+    await inMemoryStudentsRepository.items.push(student)
+    e agora em todos os comentarios a gengte vai colocar ele como autor. mas tambem colocar cada comentario com um nome comment2 2 ou 3 para assim podermos ter acesso ao id deles.
+
+        makeQuestionComment({
+        questionId: new UniqueEntityId('question-1'),
+        authorId: student.id,
+      }),
+    )
+    await inMemoryQuestionCommentsRepository.create(
+      makeQuestionComment({
+        questionId: new UniqueEntityId('question-1'),
+        authorId: student.id,
+      }),
+    )
+    await inMemoryQuestionCommentsRepository.create(
+      makeQuestionComment({
+        questionId: new UniqueEntityId('question-1'),
+        authorId: student.id,
+      }),
+    )
+
+    porem para ter acesso ao id do comentario a gente tem que fazer uma const com a criação e deoois passar essa const para o inmemoryprepository assim:
+       const comment1 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    const comment2 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    const comment3 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    await inMemoryQuestionCommentsRepository.create(comment1)
+    await inMemoryQuestionCommentsRepository.create(comment2)
+    await inMemoryQuestionCommentsRepository.create(comment3)
+
+
+
+    e agora na listagem ao invez de questionComments a gente vai usar o comments
+    
+    expect(result.value?.comments).toHaveLength(3)
+    e para ver se os dados do autor estão mesmo vindo a gente vai fazer um expect para isso tambem/
+assim podemos fazer esse expect
+    expect(result.value?.comments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment1.id.toString(),
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment2.id.toString(),
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment3.id.toString(),
+        }),
+      ]),
+    )
+    e no segundo teste a gente so muda de questionComment para comment a pagina toda fica assim:
+    import { InMemoryQuestionCommentsRepository } from 'test/repositories/in-memory-question-comments-repository'
+import { ListQuestionCommentsUseCase } from './list-question-comments'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { makeQuestionComment } from 'test/factories/make-question-comment'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { makeStudent } from 'test/factories/make-student'
+
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryQuestionCommentsRepository: InMemoryQuestionCommentsRepository
+let sut: ListQuestionCommentsUseCase
+
+describe('list recent questioncomments test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryQuestionCommentsRepository = new InMemoryQuestionCommentsRepository(
+      inMemoryStudentsRepository,
+    )
+    sut = new ListQuestionCommentsUseCase(inMemoryQuestionCommentsRepository)
+  })
+
+  test('if can list the questions questioncomments', async () => {
+    const student = makeStudent({ name: 'Jhon Doe' })
+    await inMemoryStudentsRepository.items.push(student)
+    const comment1 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    const comment2 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    const comment3 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    await inMemoryQuestionCommentsRepository.create(comment1)
+    await inMemoryQuestionCommentsRepository.create(comment2)
+    await inMemoryQuestionCommentsRepository.create(comment3)
+
+    const result = await sut.execute({
+      questionId: 'question-1',
+      page: 1,
+    })
+
+    expect(result.value?.comments).toHaveLength(3)
+    expect(result.value?.comments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment1.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment2.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment3.id,
+        }),
+      ]),
+    )
+  })
+
+  test('if can list paginated question comments', async () => {
+    for (let i = 1; i <= 22; i++) {
+      await inMemoryQuestionCommentsRepository.create(
+        makeQuestionComment({ questionId: new UniqueEntityId('question-1') }),
+      )
+    }
+
+    const result = await sut.execute({
+      questionId: 'question-1',
+      page: 2,
+    })
+
+    expect(result.value?.comments).toHaveLength(2)
+  })
+})
+
+porem se a gente rodar os testes ele vai dar o erro de autnhor com o id não existe. awuele erro que a gente configurou
+porem o erro vai ser de outros testes porque como  inmemoryquestionComments agora tem uma dependencia para o studentrepository outros testes que usam esse repostiory vao falhar.
+porem o teste de baixo esta falhando porque ele esta criando comentario sem autor e a gente não pode mais criar comentario sem autor então precisamos tambem criar o student nesse teste e passar o id quando a gente cria os questionComments
+com a alteração a pagina fica assim:
+import { InMemoryQuestionCommentsRepository } from 'test/repositories/in-memory-question-comments-repository'
+import { ListQuestionCommentsUseCase } from './list-question-comments'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { makeQuestionComment } from 'test/factories/make-question-comment'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { makeStudent } from 'test/factories/make-student'
+
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryQuestionCommentsRepository: InMemoryQuestionCommentsRepository
+let sut: ListQuestionCommentsUseCase
+
+describe('list recent questioncomments test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryQuestionCommentsRepository = new InMemoryQuestionCommentsRepository(
+      inMemoryStudentsRepository,
+    )
+    sut = new ListQuestionCommentsUseCase(inMemoryQuestionCommentsRepository)
+  })
+
+  test('if can list the questions questioncomments', async () => {
+    const student = makeStudent({ name: 'Jhon Doe' })
+    await inMemoryStudentsRepository.items.push(student)
+    const comment1 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    const comment2 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    const comment3 = makeQuestionComment({
+      questionId: new UniqueEntityId('question-1'),
+      authorId: student.id,
+    })
+
+    await inMemoryQuestionCommentsRepository.create(comment1)
+    await inMemoryQuestionCommentsRepository.create(comment2)
+    await inMemoryQuestionCommentsRepository.create(comment3)
+
+    const result = await sut.execute({
+      questionId: 'question-1',
+      page: 1,
+    })
+
+    expect(result.value?.comments).toHaveLength(3)
+    expect(result.value?.comments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment1.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment2.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment3.id,
+        }),
+      ]),
+    )
+  })
+
+  test('if can list paginated question comments', async () => {
+    const student = makeStudent({ name: 'Jhon Doe' })
+    await inMemoryStudentsRepository.items.push(student)
+    for (let i = 1; i <= 22; i++) {
+      await inMemoryQuestionCommentsRepository.create(
+        makeQuestionComment({
+          questionId: new UniqueEntityId('question-1'),
+          authorId: student.id,
+        }),
+      )
+    }
+
+    const result = await sut.execute({
+      questionId: 'question-1',
+      page: 2,
+    })
+
+    expect(result.value?.comments).toHaveLength(2)
+  })
+})
+agora rodos testes passam
+agora so precisamos nos controllers fazer ele retornar scomentarios com autnor.
+
