@@ -13199,3 +13199,156 @@ describe('list recent questioncomments test', () => {
 agora rodos testes passam
 agora so precisamos nos controllers fazer ele retornar scomentarios com autnor.
 
+## prisma comentario com author 
+vamos la na camada de infa em database eabrimos os repositorios prisma question comments ele vai estar falhando porque não implementamos o metodo. vamos então duplicar o findManyByquestionid
+e mudar o nome  como fizemos no outro e colocamos ele para retornar o commentWithAuthor
+e ai nele a gente ta fazendo uma busca no prisma e o prisma nos da a possibilidade de usar o include quando usamos o findMany para trazer dados do relacionamento
+assim a gente pode colocar author: true e ai ele vai trazer tanto os dados do comment quanto do author pq ele vai no relacionamento e pega as coisas das duas tabelas. para uma representação visual a questionComment vai ser isso agora:
+const questionsComment: ({
+    author: {
+        id: string;
+        name: string;
+        email: string;
+        password: string;
+        role: $Enums.UserRole;
+    };
+} & {
+    id: string;
+    content: string;
+    createdAt: Date;
+    updatedAt: Date | null;
+    authorId: string;
+    questionId: string | null;
+    answerId: string | null;
+})[]
+
+repare que tem dados do author e do commentario.
+o nome disso é eagerloading
+porem o prismaMapperquestionComment não esta preparado para essa informação do author por isso temos um erro porque ele so pega um comentario sem qualquer relacionamento e transforma e uma entidade ee néao esta preparado para pegar tambem o authro
+então vamos criar o prisma-comment-with-author-mapper.ts
+vamos criar um novo arquivo e não somplismente um novo metodo porque  porque a gente vai aproveitar ele tanto para respostas quanto para perguntas
+a gente vai criar a classe dentro dele com o unico metodo toDomain
+que vai receber um raw que vai ser por enquanto any
+e vai devolver commentWithAuthor e ai dentro dele a gente da um return commentWithAuthor.create e dentro desse create a gente vai coocando as coisas.
+ ainda sem colocar o codigo fica assim:
+ import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+
+export class PrismaCommentWithAuthorMapper {
+  static todomain(raw: any): CommentWithAuthor {
+    return CommentWithAuthor.create({
+        
+    })
+  }
+}
+
+então como o metodo la do repositorio tras as infos do comentario mas tambem um objeto com os dados do autor a gente quando for tipar o raw vamos precisar e ai vamos importar la do prisma client o commentario chamando ele de prismaComment e o author que é o user chamando ele de prismaUser
+assim a gente pode fazer a nossa tipagem PrismaCommentWithAuthor ser = ao comment + dentro dele um objecto que vai ser o author que vai ser o prismaUser isso na sintaxe fica assim
+
+type PrismaCommentWithAuthor = PrismaComment & {
+  author: PrismaUser
+}
+
+e ai vamos dizer qeu o tipo de raw é isso
+e agora podemos preencher o campo created usando unique entity id para os id e para o author usando raw.author.name. a pagina fica assim:
+import { Comment as PrismaComment, User as PrismaUser } from '@prisma/client'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+
+type PrismaCommentWithAuthor = PrismaComment & {
+  author: PrismaUser
+}
+
+export class PrismaCommentWithAuthorMapper {
+  static toDomain(raw: PrismaCommentWithAuthor): CommentWithAuthor {
+    return CommentWithAuthor.create({
+      commentId: new UniqueEntityId(raw.id),
+      authorId: new UniqueEntityId(raw.authorId),
+      content: raw.content,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+      author: raw.author.name,
+    })
+  }
+}
+
+e agora la no repositorio a gente pode usar esse mapper para a p metodo
+ async findManyByQuestionIdWithAuthor(
+
+  a pagina toda do repositorio fica assim:
+  import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { QuestionComment } from '@/domain/forum/enterprise/entities/question-comment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionCommentMapper } from '../mappers/prisma-question-comment-mapper'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+import { PrismaCommentWithAuthorMapper } from '../mappers/prisma-comment-with-author-mapper'
+
+@Injectable()
+export class PrismaQuestionCommentsRepository
+  implements QuestionCommentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<QuestionComment | null> {
+    const questionComment = await this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!questionComment) {
+      return null
+    }
+    return PrismaQuestionCommentMapper.toDomain(questionComment)
+  }
+
+  async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<QuestionComment[]> {
+    const questionsComment = await this.prisma.comment.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questionsComment.map(PrismaQuestionCommentMapper.toDomain)
+  }
+
+  async findManyByQuestionIdWithAuthor(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<CommentWithAuthor[]> {
+    const questionsComment = await this.prisma.comment.findMany({
+      where: { questionId },
+      include: {
+        author: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questionsComment.map(PrismaCommentWithAuthorMapper.toDomain)
+  }
+
+  async create(questionComment: QuestionComment): Promise<void> {
+    const data = PrismaQuestionCommentMapper.toPrisma(questionComment)
+    await this.prisma.comment.create({
+      data,
+    })
+  }
+
+  async delete(questionComment: QuestionComment): Promise<void> {
+    await this.prisma.comment.delete({
+      where: { id: questionComment.id.toString() },
+    })
+  }
+}
+
+agora falta la no controller a gente ajustar as coisas hoje ele tem um presenter 
