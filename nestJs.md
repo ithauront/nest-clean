@@ -13351,4 +13351,188 @@ export class PrismaQuestionCommentsRepository
   }
 }
 
-agora falta la no controller a gente ajustar as coisas hoje ele tem um presenter 
+agora falta la no controller a gente ajustar as coisas hoje ele tem um presenter que recebe a entidade commentario e devolve algumas coisas com base nisso. como a gente mudou umas coisas a gente vai ter que fazer ajustes tambem no controller.
+
+## controller CommentWithAuthor
+vamos no fetch questioncomments controller e vamos mudar porque não estamos mais retornando questioncomments e sim so comments assim:
+
+    const comments = result.value.comments
+
+    return { comments: comments.map(CommentPresenter.toHTTP) }
+
+    porem ai vamos ter um erro no nosso presenter então amos criar um novo presenter chamado comment with author presenter.ts
+    e ele vai receber um comment with author
+    export class CommentWithAuthorPresenter {
+  static toHTTP(commentWithAuthor: CommentWithAuthor) {
+    return {
+
+      e ele vai devolver as informações do jeito que for mais interessante para o frontEnd
+      e com o presenter a gente pode mudar o nome das informações então vamos colocar authorName para ser o author pq a informação que esta dentro do author é o nome do autor mesmo.
+      o presenter fica assim:
+      import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+
+export class CommentWithAuthorPresenter {
+  static toHTTP(commentWithAuthor: CommentWithAuthor) {
+    return {
+      commentId: commentWithAuthor.commentId.toString(),
+      authorId: commentWithAuthor.authorId.toString(),
+      authorName: commentWithAuthor.author,
+      content: commentWithAuthor.content,
+      createdAt: commentWithAuthor.createdAt,
+      updatedAt: commentWithAuthor.updatedAt,
+    }
+  }
+}
+
+
+agora voltaos para o controller e podemus usar esse presenter
+e o controller com as alterações fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Query,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListQuestionCommentsUseCase } from '@/domain/forum/application/use-cases/list-question-comments'
+import { CommentWithAuthorPresenter } from '../presenters/comment-with-author-presenter'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/questions/:questionId/comments')
+export class FetchQuestionCommentController {
+  constructor(private fetchQuestionComments: ListQuestionCommentsUseCase) {}
+
+  @Get()
+  async handle(
+    @Query('page', queryValidationPipe) page: PageParamsTypeSchema,
+    @Param('questionId') questionId: string,
+  ) {
+    const result = await this.fetchQuestionComments.execute({
+      page,
+      questionId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+    const comments = result.value.comments
+
+    return { comments: comments.map(CommentWithAuthorPresenter.toHTTP) }
+  }
+}
+
+agora vamos para o teste desse controller
+a gente ja esta criando usuario, mas vamos criar ele com nome especifico
+  const user = await studentFactory.makePrismaStudent({
+      name: 'Jhon Doe',
+    })
+    e no expect vamos verificar se o authorName vai ser o jhon doe que a gente definiu com as alterações o teste fica assim:
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionCommentFactory } from 'test/factories/make-question-comment'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Fetch questions comments tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let questionCommentFactory: QuestionCommentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, QuestionCommentFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    questionCommentFactory = moduleRef.get(QuestionCommentFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions/:questionId/comments', async () => {
+    const user = await studentFactory.makePrismaStudent({
+      name: 'Jhon Doe',
+    })
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    await Promise.all([
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 01',
+      }),
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 02',
+      }),
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 03',
+      }),
+      questionCommentFactory.makePrismaQuestionComment({
+        authorId: user.id,
+        questionId: question.id,
+        content: 'Comment 04',
+      }),
+    ])
+
+    const response = await request(app.getHttpServer())
+      .get(`/questions/${questionId}/comments`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      comments: expect.arrayContaining([
+        expect.objectContaining({
+          content: 'Comment 01',
+          authorName: 'Jhon Doe',
+        }),
+        expect.objectContaining({
+          content: 'Comment 02',
+          authorName: 'Jhon Doe',
+        }),
+        expect.objectContaining({
+          content: 'Comment 03',
+          authorName: 'Jhon Doe',
+        }),
+        expect.objectContaining({
+          content: 'Comment 04',
+          authorName: 'Jhon Doe',
+        }),
+      ]),
+    })
+  })
+})
+
+
