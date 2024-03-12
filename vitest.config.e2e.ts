@@ -4,7 +4,7 @@ import tsConfigPaths from 'vite-tsconfig-paths'
 
 export default defineConfig({
   test: {
-    include: ['**/fetch-question-comments.controller.e2e-spec.ts'],
+    include: ['**/fetch-answer-comment.controller.e2e-spec.ts'],
     globals: true,
     root: './',
     setupFiles: ['./test/setup-e2e.ts'],

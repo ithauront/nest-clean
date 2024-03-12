@@ -13535,4 +13535,524 @@ describe('Fetch questions comments tests (e2e)', () => {
   })
 })
 
+## comentario da resposta com autor
+agora vamos fazer a mesma funcionalidade porem para o comentario de resposta
+em entreprise não precisamos mudar nada porque vamos usar o mesmo value object que criamos que é o comment with author.
+então vamos no repositorio de answerComments para mudar os metodo criamos o findManyByAnswerIdWithAuthor que vai retornar um commentWith author a pagina fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerComment } from '../../enterprise/entities/answer-comment'
+import { CommentWithAuthor } from '../../enterprise/entities/value-objects/comment-with-author'
 
+export abstract class AnswerCommentsRepository {
+  abstract findById(id: string): Promise<AnswerComment | null>
+  abstract findManyByAnswerId(
+    answerId: string,
+    params: PaginationParams,
+  ): Promise<AnswerComment[]>
+
+  abstract findManyByAnswerIdWithAuthor(
+    answerId: string,
+    params: PaginationParams,
+  ): Promise<CommentWithAuthor[]>
+
+  abstract create(answerComment: AnswerComment): Promise<void>
+  abstract delete(answerComment: AnswerComment): Promise<void>
+}
+
+
+então vamos em useCases
+vamos no list answerComments
+a gente muda o retorno dele. e no execute a gente muda para usar o metodo que criamos e mudamos as coisas de answerComment para comment
+a pagina fica assim:
+import { Either, right } from '@/core/either'
+import { AnswerCommentsRepository } from '../repositories/answer-comments-repository'
+import { Injectable } from '@nestjs/common'
+import { CommentWithAuthor } from '../../enterprise/entities/value-objects/comment-with-author'
+
+interface ListAnswerCommentsUseCaseRequest {
+  answerId: string
+  page: number
+}
+type ListAnswerCommentsUseCaseResponse = Either<
+  null,
+  {
+    comments: CommentWithAuthor[]
+  }
+>
+
+@Injectable()
+export class ListAnswerCommentsUseCase {
+  constructor(private answerCommentsRepository: AnswerCommentsRepository) {}
+
+  async execute({
+    page,
+    answerId,
+  }: ListAnswerCommentsUseCaseRequest): Promise<ListAnswerCommentsUseCaseResponse> {
+    const comments =
+      await this.answerCommentsRepository.findManyByAnswerIdWithAuthor(
+        answerId,
+        {
+          page,
+        },
+      )
+
+    return right({ comments })
+  }
+}
+
+agora para fazer o teste vamos ter ue mudar o nosso inMemoryRepository
+vamos copiar do inMemoryQuestionComments o metodo porque vai sr muito parecido. e a genente modifica ele para ao invez de tratar de questão tratar de answer, mudando os nomes. fazemos tambel o condtructor para o student repository a pagina fica assim:
+import { DomainEvents } from '@/core/event/domain-events'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+import { InMemoryStudentsRepository } from './in-memory-students-repository'
+
+export class InMemoryAnswerCommentsRepository
+  implements AnswerCommentsRepository
+{
+  public items: AnswerComment[] = []
+
+  constructor(private studentsRepository: InMemoryStudentsRepository) {}
+
+  async findById(id: string) {
+    const answerComment = this.items.find((item) => item.id.toString() === id)
+    if (!answerComment) {
+      return null
+    }
+    return answerComment
+  }
+
+  async findManyByAnswerId(answerId: string, { page }: PaginationParams) {
+    const answerComments = this.items
+      .filter((item) => item.answerId.toString() === answerId)
+      .slice((page - 1) * 20, page * 20)
+
+    return answerComments
+  }
+
+  async findManyByAnswerIdWithAuthor(
+    answerId: string,
+    { page }: PaginationParams,
+  ) {
+    const answerComments = this.items
+      .filter((item) => item.answerId.toString() === answerId)
+      .slice((page - 1) * 20, page * 20)
+      .map((comment) => {
+        const author = this.studentsRepository.items.find((student) => {
+          return student.id.equals(comment.authorId)
+        })
+
+        if (!author) {
+          throw new Error(`Author with ID ${comment.authorId} does not exists`)
+        }
+
+        return CommentWithAuthor.create({
+          commentId: comment.id,
+          content: comment.content,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+          authorId: comment.authorId,
+          author: author.name,
+        })
+      })
+
+    return answerComments
+  }
+
+  async create(answerComment: AnswerComment) {
+    this.items.push(answerComment)
+
+    DomainEvents.dispatchEventsForAggregate(answerComment.id)
+  }
+
+  async delete(answerComment: AnswerComment) {
+    const itemIndex = this.items.findIndex(
+      (item) => item.id === answerComment.id,
+    )
+    await this.items.splice(itemIndex, 1)
+  }
+}
+
+agora a gente pode modificar nosso teste
+a gente instancia o student repository
+e agora como o nosso answerRepository depende do student todoanswerComment que a gente criar vai precisar ter um autor real então vamos criar um student la tambem
+e passamos o id dele na criação de cada comment. agora no expect ao invez de esperar o answerComments a gente so espera o comment porque a gente tinha mudado isso la
+e a gente verifica tambem a parte se oscommentarios estão vindo com o nome do author e o id do commentario diferente então a gente separa a criação de comments e faz o expect como tinhamos feito no teste de question
+  test('if can list the answers answercomments', async () => {
+    const student = makeStudent({ name: 'Jhon Doe' })
+
+    inMemoryStudentsRepository.items.push(student)
+
+    const comment1 = makeAnswerComment({
+      answerId: new UniqueEntityId('answer-1'),
+      authorId: student.id,
+    })
+    const comment2 = makeAnswerComment({
+      answerId: new UniqueEntityId('answer-1'),
+      authorId: student.id,
+    })
+    const comment3 = makeAnswerComment({
+      answerId: new UniqueEntityId('answer-1'),
+      authorId: student.id,
+    })
+
+    await inMemoryAnswerCommentsRepository.create(comment1)
+    await inMemoryAnswerCommentsRepository.create(comment2)
+    await inMemoryAnswerCommentsRepository.create(comment3)
+
+    const result = await sut.execute({
+      answerId: 'answer-1',
+      page: 1,
+    })
+
+    expect(result.value?.comments).toHaveLength(3)
+    expect(result.value?.comments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment1.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment2.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment3.id,
+        }),
+      ]),
+    )
+
+    agora no segundo teste a gente coloca tambem a criação de student e passamos esse studentId no loop de criação e mudamos o expect para comments no lugar de answer comments o teste todo fica assim:
+    import { InMemoryAnswerCommentsRepository } from 'test/repositories/in-memory-answer-comments-repository'
+import { ListAnswerCommentsUseCase } from './list-answer-comment'
+import { UniqueEntityId } from '../../../../core/entities/unique-entity-id'
+import { makeAnswerComment } from 'test/factories/make-answer-comment'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { makeStudent } from 'test/factories/make-student'
+
+let inMemoryAnswerCommentsRepository: InMemoryAnswerCommentsRepository
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let sut: ListAnswerCommentsUseCase
+
+describe('list recent answercomments test', () => {
+  beforeEach(() => {
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryAnswerCommentsRepository = new InMemoryAnswerCommentsRepository(
+      inMemoryStudentsRepository,
+    )
+    sut = new ListAnswerCommentsUseCase(inMemoryAnswerCommentsRepository)
+  })
+
+  test('if can list the answers answercomments', async () => {
+    const student = makeStudent({ name: 'Jhon Doe' })
+
+    inMemoryStudentsRepository.items.push(student)
+
+    const comment1 = makeAnswerComment({
+      answerId: new UniqueEntityId('answer-1'),
+      authorId: student.id,
+    })
+    const comment2 = makeAnswerComment({
+      answerId: new UniqueEntityId('answer-1'),
+      authorId: student.id,
+    })
+    const comment3 = makeAnswerComment({
+      answerId: new UniqueEntityId('answer-1'),
+      authorId: student.id,
+    })
+
+    await inMemoryAnswerCommentsRepository.create(comment1)
+    await inMemoryAnswerCommentsRepository.create(comment2)
+    await inMemoryAnswerCommentsRepository.create(comment3)
+
+    const result = await sut.execute({
+      answerId: 'answer-1',
+      page: 1,
+    })
+
+    expect(result.value?.comments).toHaveLength(3)
+    expect(result.value?.comments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment1.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment2.id,
+        }),
+        expect.objectContaining({
+          author: 'Jhon Doe',
+          commentId: comment3.id,
+        }),
+      ]),
+    )
+  })
+
+  test('if can list paginated answer comments', async () => {
+    const student = makeStudent({ name: 'Jhon Doe' })
+
+    inMemoryStudentsRepository.items.push(student)
+    for (let i = 1; i <= 22; i++) {
+      await inMemoryAnswerCommentsRepository.create(
+        makeAnswerComment({
+          answerId: new UniqueEntityId('answer-1'),
+          authorId: student.id,
+        }),
+      )
+    }
+
+    const result = await sut.execute({
+      answerId: 'answer-1',
+      page: 2,
+    })
+
+    expect(result.value?.comments).toHaveLength(2)
+  })
+})
+
+se a gente passar os unit tests funciona
+vamos para o infra agora vamos começar dentro do repositorio do prisma e copiamos e colamos o metodo que tinhamos no questionCommets
+fazemos as alterações e as importações lembrando que nessa parte do prisma a gente vai usar o mesmo mapper porque como usam a mesma tabela não tem tanto problema.
+a pagina fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerCommentMapper } from '../mappers/prisma-answer-comment-mapper'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+import { PrismaCommentWithAuthorMapper } from '../mappers/prisma-comment-with-author-mapper'
+
+@Injectable()
+export class PrismaAnswerCommentsRepository
+  implements AnswerCommentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<AnswerComment | null> {
+    const answerComment = await this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!answerComment) {
+      return null
+    }
+    return PrismaAnswerCommentMapper.toDomain(answerComment)
+  }
+
+  async findManyByAnswerId(
+    answerId: string,
+    { page }: PaginationParams,
+  ): Promise<AnswerComment[]> {
+    const answersComment = await this.prisma.comment.findMany({
+      where: { answerId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answersComment.map(PrismaAnswerCommentMapper.toDomain)
+  }
+
+  async findManyByAnswerIdWithAuthor(
+    answerId: string,
+    { page }: PaginationParams,
+  ): Promise<CommentWithAuthor[]> {
+    const answerComment = await this.prisma.comment.findMany({
+      where: { answerId },
+      include: {
+        author: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answerComment.map(PrismaCommentWithAuthorMapper.toDomain)
+  }
+
+  async create(answerComment: AnswerComment): Promise<void> {
+    const data = PrismaAnswerCommentMapper.toPrisma(answerComment)
+    await this.prisma.comment.create({
+      data,
+    })
+  }
+
+  async delete(answerComment: AnswerComment): Promise<void> {
+    await this.prisma.comment.delete({
+      where: { id: answerComment.id.toString() },
+    })
+  }
+}
+
+agora vamos para o controller
+fetchanswerComments comntroller a gente muda de answercomments para comment e ao invez de usar o commentPresenter a gente vai usar o comment withauthor presenter fica assim:
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Query,
+} from '@nestjs/common'
+import { ZodValidationPipe } from '@/infra/http/pipes/zod-validation-pipe'
+import { z } from 'zod'
+import { ListAnswerCommentsUseCase } from '@/domain/forum/application/use-cases/list-answer-comment'
+import { CommentWithAuthorPresenter } from '../presenters/comment-with-author-presenter'
+
+const pageQueryParamsSchema = z
+  .string()
+  .optional()
+  .default('1')
+  .transform(Number)
+  .pipe(z.number().min(1))
+
+const queryValidationPipe = new ZodValidationPipe(pageQueryParamsSchema)
+
+type PageParamsTypeSchema = z.infer<typeof pageQueryParamsSchema>
+
+@Controller('/answers/:answerId/comments')
+export class FetchAnswerCommentController {
+  constructor(private fetchAnswerComments: ListAnswerCommentsUseCase) {}
+
+  @Get()
+  async handle(
+    @Query('page', queryValidationPipe) page: PageParamsTypeSchema,
+    @Param('answerId') answerId: string,
+  ) {
+    const result = await this.fetchAnswerComments.execute({
+      page,
+      answerId,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+    const comments = result.value.comments
+
+    return { comments: comments.map(CommentWithAuthorPresenter.toHTTP) }
+  }
+}
+
+
+agora podemos ir para o teste
+vamos criar um usuario coocar um nome dnele e verificar que ele esta sendo retornado o teste fica assim:
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { AnswerCommentFactory } from 'test/factories/make-answer-comment'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionCommentFactory } from 'test/factories/make-question-comment'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Fetch answers comments tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let answerCommentFactory: AnswerCommentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AnswerCommentFactory,
+        AnswerFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    answerCommentFactory = moduleRef.get(AnswerCommentFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/answers/:answerId/comments', async () => {
+    const user = await studentFactory.makePrismaStudent({
+      name: 'Jhon Doe',
+    })
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const answer = await answerFactory.makePrismaAnswer({
+      authorId: user.id,
+      questionId: question.id,
+    })
+
+    const answerId = answer.id.toString()
+
+    await Promise.all([
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 01',
+      }),
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 02',
+      }),
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 03',
+      }),
+      answerCommentFactory.makePrismaAnswerComment({
+        authorId: user.id,
+        answerId: answer.id,
+        content: 'Comment 04',
+      }),
+    ])
+
+    const response = await request(app.getHttpServer())
+      .get(`/answers/${answerId}/comments`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      comments: expect.arrayContaining([
+        expect.objectContaining({
+          content: 'Comment 01',
+          authorName: 'Jhon Doe',
+        }),
+        expect.objectContaining({
+          content: 'Comment 02',
+          authorName: 'Jhon Doe',
+        }),
+        expect.objectContaining({
+          content: 'Comment 03',
+          authorName: 'Jhon Doe',
+        }),
+        expect.objectContaining({
+          content: 'Comment 04',
+          authorName: 'Jhon Doe',
+        }),
+      ]),
+    })
+  })
+})
+
+agora a gente roda o test e2e e passando nos sabemnos que ja estamos retornarndo o commentario com os dados do autor desse comentario.
