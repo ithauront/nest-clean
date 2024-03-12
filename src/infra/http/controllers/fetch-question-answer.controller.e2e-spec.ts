@@ -31,7 +31,9 @@ describe('Fetch questions answer tests (e2e)', () => {
   })
 
   test('[get]/questions/:questionId/answers', async () => {
-    const user = await studentFactory.makePrismaStudent()
+    const user = await studentFactory.makePrismaStudent({
+      name: 'John Doe',
+    })
 
     const accessToken = jwt.sign({ sub: user.id.toString() })
 
@@ -72,10 +74,22 @@ describe('Fetch questions answer tests (e2e)', () => {
     expect(response.statusCode).toBe(200)
     expect(response.body).toEqual({
       answers: expect.arrayContaining([
-        expect.objectContaining({ content: 'Answer 01' }),
-        expect.objectContaining({ content: 'Answer 02' }),
-        expect.objectContaining({ content: 'Answer 03' }),
-        expect.objectContaining({ content: 'Answer 04' }),
+        expect.objectContaining({
+          content: 'Answer 01',
+          authorName: 'John Doe',
+        }),
+        expect.objectContaining({
+          content: 'Answer 02',
+          authorName: 'John Doe',
+        }),
+        expect.objectContaining({
+          content: 'Answer 03',
+          authorName: 'John Doe',
+        }),
+        expect.objectContaining({
+          content: 'Answer 04',
+          authorName: 'John Doe',
+        }),
       ]),
     })
   })

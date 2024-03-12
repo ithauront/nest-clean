@@ -14056,3 +14056,8 @@ describe('Fetch answers comments tests (e2e)', () => {
 })
 
 agora a gente roda o test e2e e passando nos sabemnos que ja estamos retornarndo o commentario com os dados do autor desse comentario.
+
+# dados da resposta.
+assim como fizemos com os dados da pergunta trazendo dados do autor vamos fazer tambem para a resposta. da mesma forma que o question comment tem as suas coisas a answer question tambem trazer os dados. então vamos fazer isso
+# value object detalhes da pergunta
+agora vamos criar um value object para que quando clicar para vilualizar uma pergunta ela traga os dados do autor e dos anexos da pergunta
