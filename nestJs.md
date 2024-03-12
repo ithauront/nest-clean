@@ -14061,3 +14061,274 @@ agora a gente roda o test e2e e passando nos sabemnos que ja estamos retornarndo
 assim como fizemos com os dados da pergunta trazendo dados do autor vamos fazer tambem para a resposta. da mesma forma que o question comment tem as suas coisas a answer question tambem trazer os dados. então vamos fazer isso
 # value object detalhes da pergunta
 agora vamos criar um value object para que quando clicar para vilualizar uma pergunta ela traga os dados do autor e dos anexos da pergunta
+vamos criar m value object chamado uestion-details porque queremos retornar os datos da pergunta com mais relacionamento o autor e os anexos
+copiamos e colamos o comment wiht autor e mudamos os nomes
+nas props a gente coloca o attachment como sendo o Attachment entidade e array. isso porque essa entidade retorna apenas o url e o title e como nos vamos precisar dessas duas coisas a gente pode reaproveitar. se fosse uma entidade que retornasse enormemente de coisas que a gente não fosse usar a gente poderai recriar o attachment novalue object como sendo um array de objetos com algumas informações
+o value object fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { ValueObject } from '@/core/entities/value-object'
+import { Slug } from './slug'
+import { Attachment } from '../attachment'
+
+export interface QuestionWithDetailsProps {
+  questionId: UniqueEntityId
+  authorId: UniqueEntityId
+  author: string
+  title: string
+  content: string
+  slug: Slug
+  attachments: Attachment[]
+  bestAnswerId?: UniqueEntityId | null
+  createdAt: Date
+  updatedAt?: Date | null
+}
+export class QuestionWithDetails extends ValueObject<QuestionWithDetailsProps> {
+  get questionId() {
+    return this.props.questionId
+  }
+
+  get authorId() {
+    return this.props.authorId
+  }
+
+  get author() {
+    return this.props.author
+  }
+
+  get title() {
+    return this.props.title
+  }
+
+  get content() {
+    return this.props.content
+  }
+
+  get slug() {
+    return this.props.slug
+  }
+
+  get attachments() {
+    return this.props.attachments
+  }
+
+  get bestAnswerId() {
+    return this.props.bestAnswerId
+  }
+
+  get createdAt() {
+    return this.props.createdAt
+  }
+
+  get updatedAt() {
+    return this.props.updatedAt
+  }
+
+  static create(props: QuestionWithDetailsProps) {
+    return new QuestionWithDetails(props)
+  }
+}
+
+agora vamos no repositorio do question na camada de dominio e vamos copiar o metodo getquestionByslug.  mas o getQuestionBySLug vai ser exatamente o metodo para trazer mais info sobre uma pergunta quando se clica nela então vamos usar ele para criar um novo a pagina fca assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { Questions } from '../../enterprise/entities/questions'
+import { QuestionWithDetails } from '../../enterprise/entities/value-objects/question-with-details'
+
+export abstract class QuestionsRepository {
+  abstract findById(id: string): Promise<Questions | null>
+  abstract findBySlug(slug: string): Promise<Questions | null>
+  abstract findDetailsBySlug(
+    slug: string,
+  ): Promise<QuestionWithDetails | null>
+
+  abstract findManyRecent(params: PaginationParams): Promise<Questions[]>
+  abstract create(question: Questions): Promise<void>
+  abstract delete(question: Questions): Promise<void>
+  abstract save(question: Questions): Promise<void>
+}
+
+com isso feito vamos editar o nosso caso de uso então vamos no getQuestionbySlug useCase
+mudamos o retorno para dar a questionWithDetails e o cadso de uso para usar o finddetailsBySlug fica asim:
+import { Either, left, right } from '@/core/either'
+import { QuestionsRepository } from '../repositories/questions-repository'
+import { ResourceNotFoundError } from '../../../../core/errors/errors/resource-not-found-error'
+import { Injectable } from '@nestjs/common'
+import { QuestionWithDetails } from '../../enterprise/entities/value-objects/question-with-details'
+
+interface GetQuestionBySlugUseCaseRequest {
+  slug: string
+}
+type GetQuestionBySlugUseCaseResponse = Either<
+  ResourceNotFoundError,
+  { question: QuestionWithDetails }
+>
+
+@Injectable()
+export class GetQuestionBySlugUseCase {
+  constructor(private questionsRepository: QuestionsRepository) {}
+
+  async execute({
+    slug,
+  }: GetQuestionBySlugUseCaseRequest): Promise<GetQuestionBySlugUseCaseResponse> {
+    const question = await this.questionsRepository.findDetailsBySlug(slug)
+
+    if (!question) {
+      return left(new ResourceNotFoundError())
+    }
+
+    return right({ question })
+  }
+}
+
+agora vamos la no inMemoryQuestionRepository para implementar esse novo metodo
+o nosso repositorio ja tem o questionAttachmentsRepository mas esse repositorio so armazzena os ids e não o titulo e a url e como nos queremos o titulo e aurl a gente vai precisar tambem do attachmentsRepository e do student e tambem passamos todos esses repositorios para ser inmemory fica assim o constructor constructor(
+    private questionAttachmentsRepository: InMemoryQuestionAttachmentsRepository,
+    private studentRepository: InMemoryStudentsRepository,
+    private attachmentsRepository: InMemoryAttachmentsRepository,
+  ) {}
+
+agora no metodo a gente mantem a busca pela pergunta. e ja tendo a pergunta a gente pde buscar o author.
+ const author = this.studentRepository.items.find((student) => {
+      return student.id === question.authorId
+    })
+  
+agora para pegar os questionAttachents primeiro a gente precisa pegar o id deles então vamos usar o questionAttachments repositoy e filtrar todos os attachments que tem o questionid igual o do question.Id
+  const questionAttachments = this.questionAttachmentsRepository.items.filter(
+      (attachment) => {
+        return attachment.questionId === question.id
+      },
+    )
+    isso vai nos dar uma lista de id de anexos e agora com essa lista a gente pode pegar os url e titulo deles então vamos fazer uma const attachment e vamos pegar essa lista e mapear e pegar dentro do atachmentrepository um anexo que tenha esse id,
+    const attachment = questionAttachments.map((questionAtachment) => {
+      const attachment = this.attachmentsRepository.items.find((attachment) => {
+        return attachment.id === questionAtachment.attachmentId
+      })
+      if (!attachment) {
+        throw new Error(
+          `Attachment with id ${questionAtachment.attachmentId.toString()} does not exists`,
+        )
+      }
+      return attachment
+    })
+    
+     e agora a gente vai retornar o questionWithDetails. create e preencher todos os camos dele
+     houveram alguns erros nos extratos de metodos que eu colei aqui antes. eu usei === no lugar de .equals por exemplo e o metodo tem como promisse uma questionWithDetails. então é melhor confiar nessa colada da pagina inteira que esta abaixo:
+     import { DomainEvents } from '@/core/event/domain-events'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { InMemoryAttachmentsRepository } from './in-memory-attachment-repository'
+import { InMemoryStudentsRepository } from './in-memory-students-repository'
+import { InMemoryQuestionAttachmentsRepository } from './in-memory-question-attachment-repository'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+
+export class InMemoryQuestionsRepository implements QuestionsRepository {
+  public items: Questions[] = []
+
+  constructor(
+    private questionAttachmentsRepository: InMemoryQuestionAttachmentsRepository,
+    private studentRepository: InMemoryStudentsRepository,
+    private attachmentsRepository: InMemoryAttachmentsRepository,
+  ) {}
+
+  async create(question: Questions) {
+    this.items.push(question)
+
+    await this.questionAttachmentsRepository.createMany(
+      question.attachment.getItems(),
+    )
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+
+  async findById(id: string) {
+    const question = this.items.find((item) => item.id.toString() === id)
+    if (!question) {
+      return null
+    }
+    return question
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = this.items.find((item) => item.slug.value === slug)
+    if (!question) {
+      return null
+    }
+
+    return question
+  }
+
+  async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
+    const question = this.items.find((item) => item.slug.value === slug)
+    if (!question) {
+      return null
+    }
+    const author = this.studentRepository.items.find((student) => {
+      return student.id.equals(question.authorId)
+    })
+    if (!author) {
+      throw new Error(
+        `Author with id ${question.authorId.toString()} does not exists`,
+      )
+    }
+    const questionAttachments = this.questionAttachmentsRepository.items.filter(
+      (attachment) => {
+        return attachment.questionId.equals(question.id)
+      },
+    )
+    const attachments = questionAttachments.map((questionAttachment) => {
+      const attachment = this.attachmentsRepository.items.find((attachment) => {
+        return attachment.id.equals(questionAttachment.attachmentId)
+      })
+      if (!attachment) {
+        throw new Error(
+          `Attachment with id ${questionAttachment.attachmentId.toString()} does not exists`,
+        )
+      }
+      return attachment
+    })
+
+    return QuestionWithDetails.create({
+      questionId: question.id,
+      authorId: author.id,
+      author: author.name,
+      title: question.title,
+      slug: question.slug,
+      content: question.content,
+      bestAnswerId: question.bestAnswerId,
+      attachments,
+      createdAt: question.createdAt,
+      updatedAt: question.updatedAt,
+    })
+  }
+
+  async findManyRecent({ page }: PaginationParams) {
+    const questions = this.items
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice((page - 1) * 20, page * 20)
+
+    return questions
+  }
+
+  async delete(question: Questions) {
+    const itemIndex = this.items.findIndex((item) => item.id === question.id)
+    this.items.splice(itemIndex, 1)
+
+    this.questionAttachmentsRepository.deleteManyByQuestionId(
+      question.id.toString(),
+    )
+  }
+
+  async save(question: Questions) {
+    const itemIndex = this.items.findIndex((item) => item.id === question.id)
+
+    this.items[itemIndex] = question
+
+    await this.questionAttachmentsRepository.createMany(
+      question.attachment.getNewItems(),
+    )
+    await this.questionAttachmentsRepository.deleteMany(
+      question.attachment.getRemovedItems(),
+    )
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+}
