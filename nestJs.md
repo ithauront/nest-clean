@@ -14332,3 +14332,136 @@ export class InMemoryQuestionsRepository implements QuestionsRepository {
     DomainEvents.dispatchEventsForAggregate(question.id)
   }
 }
+
+agora vamos para o test de get question by slug e el ja esta pedindo a instanciação da dependencia que a gente adicionou
+então a gente cria e instancia o inmemory students e attachments repository
+import { InMemoryQuestionsRepository } from 'test/repositories/in-memory-questions-repository'
+import { GetQuestionBySlugUseCase } from './get-question-by-slug'
+
+import { Slug } from '../../enterprise/entities/value-objects/slug'
+import { makeQuestion } from 'test/factories/make-question'
+import { InMemoryQuestionAttachmentsRepository } from 'test/repositories/in-memory-question-attachment-repository'
+import { InMemoryAttachmentsRepository } from 'test/repositories/in-memory-attachment-repository'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+
+let inMemoryQuestionsAttachmentRepository: InMemoryQuestionAttachmentsRepository
+let inMemoryAttachmentsRepository: InMemoryAttachmentsRepository
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryQuestionsRepository: InMemoryQuestionsRepository
+let sut: GetQuestionBySlugUseCase
+
+describe('get question by slug test', () => {
+  beforeEach(() => {
+    inMemoryQuestionsAttachmentRepository =
+      new InMemoryQuestionAttachmentsRepository()
+    inMemoryAttachmentsRepository = new InMemoryAttachmentsRepository()
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryQuestionsRepository = new InMemoryQuestionsRepository(
+      inMemoryQuestionsAttachmentRepository,
+      inMemoryAttachmentsRepository,
+      inMemoryStudentsRepository,
+    )
+    sut = new GetQuestionBySlugUseCase(inMemoryQuestionsRepository)
+  })
+  sabendo que a ordem delesdentro do questionRepository tem que ser a mesma do que aparece dentro do constructor do questionRepository. eu aletrei a ordem la no constructor do question repository para bater com essa e o erro sair.
+  agora no teste atualmente a gente so estava criando a pergunta mas nos queremos verificar se esta vindo os dados do autor e dos attachments então a gente vai criar um student com a factory para ele ser o autor
+   const student = makeStudent({ name: 'John Doe' })
+    inMemoryStudentsRepository.items.push(student)
+    depois a gente cria a questão passando o autorid e o anexo com um titulo de attachment
+    
+    const newQuestion = makeQuestion({
+      slug: Slug.create('exemple-slug'),
+      authorId: student.id
+    })
+    await inMemoryQuestionsRepository.create(newQuestion)
+
+    const attachment = makeAttachment({
+      title: 'Some attachment',
+    })
+    inMemoryAttachmentsRepository.items.push(attachment)
+
+e agora a gente vai fazer o questionAttachment 
+ inMemoryQuestionsAttachmentRepository.items.push(
+      makeQuestionAttachments({
+        attachmentId: attachment.id,
+        questionId: newQuestion.id,
+      }),
+    )
+
+  agora quando chamarmos o caso de uso ele tem que trazer as informações do titulo, doautor e os attachments o teste fica assim e ele passa:
+  import { InMemoryQuestionsRepository } from 'test/repositories/in-memory-questions-repository'
+import { GetQuestionBySlugUseCase } from './get-question-by-slug'
+
+import { Slug } from '../../enterprise/entities/value-objects/slug'
+import { makeQuestion } from 'test/factories/make-question'
+import { InMemoryQuestionAttachmentsRepository } from 'test/repositories/in-memory-question-attachment-repository'
+import { InMemoryAttachmentsRepository } from 'test/repositories/in-memory-attachment-repository'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { makeStudent } from 'test/factories/make-student'
+import { makeAttachment } from 'test/factories/make-attachemnt'
+import { makeQuestionAttachments } from 'test/factories/make-question-attachments'
+
+let inMemoryQuestionsAttachmentRepository: InMemoryQuestionAttachmentsRepository
+let inMemoryAttachmentsRepository: InMemoryAttachmentsRepository
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryQuestionsRepository: InMemoryQuestionsRepository
+let sut: GetQuestionBySlugUseCase
+
+describe('get question by slug test', () => {
+  beforeEach(() => {
+    inMemoryQuestionsAttachmentRepository =
+      new InMemoryQuestionAttachmentsRepository()
+    inMemoryAttachmentsRepository = new InMemoryAttachmentsRepository()
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryQuestionsRepository = new InMemoryQuestionsRepository(
+      inMemoryQuestionsAttachmentRepository,
+      inMemoryAttachmentsRepository,
+      inMemoryStudentsRepository,
+    )
+    sut = new GetQuestionBySlugUseCase(inMemoryQuestionsRepository)
+  })
+
+  test('if can get a question by slug', async () => {
+    const student = makeStudent({ name: 'John Doe' })
+    inMemoryStudentsRepository.items.push(student)
+
+    const newQuestion = makeQuestion({
+      slug: Slug.create('exemple-slug'),
+      authorId: student.id,
+    })
+    await inMemoryQuestionsRepository.create(newQuestion)
+
+    const attachment = makeAttachment({
+      title: 'Some attachment',
+    })
+    inMemoryAttachmentsRepository.items.push(attachment)
+
+    inMemoryQuestionsAttachmentRepository.items.push(
+      makeQuestionAttachments({
+        attachmentId: attachment.id,
+        questionId: newQuestion.id,
+      }),
+    )
+
+    const result = await sut.execute({
+      slug: 'exemple-slug',
+    })
+
+    if (result.isRight()) {
+      expect(result.value).toMatchObject({
+        question: expect.objectContaining({
+          title: newQuestion.title,
+          author: 'John Doe',
+          attachments: [
+            expect.objectContaining({
+              title: 'Some attachment',
+            }),
+          ],
+        }),
+      })
+    }
+  })
+})
+
+porem agora as dependencias vao dar erro de typescript em outros testes que usam o questionsRepository (mas os testes passam mesmo assim)
+entã agora a gente vai ter que fazer a instanciação dessas duas linhas em todos os arquivos que usam o questionRepository. néao vou colocar o processo todo aqui mas é basicamente o let e o before each em cada um desses arquivos para ficar parecido com o desse teste do slug; e como a gente mudou o de answer tambem temos que colocar o student nos que usam o answer

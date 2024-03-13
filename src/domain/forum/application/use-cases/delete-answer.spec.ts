@@ -5,17 +5,21 @@ import { DeleteAnswerUseCase } from './delete-answer'
 import { UnauthorizedError } from '../../../../core/errors/errors/unauthorized'
 import { makeAnswerAttachments } from 'test/factories/make-answer-attachments'
 import { InMemoryAnswerAttachmentsRepository } from 'test/repositories/in-memory-answer-attachment-repository'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
 
 let inMemoryAnswersAttachmentRepository: InMemoryAnswerAttachmentsRepository
 let inMemoryAnswersRepository: InMemoryAnswersRepository
+let inMemoryStudentsRepository: InMemoryStudentsRepository
 let sut: DeleteAnswerUseCase
 
 describe('delete answer', () => {
   beforeEach(() => {
     inMemoryAnswersAttachmentRepository =
       new InMemoryAnswerAttachmentsRepository()
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
     inMemoryAnswersRepository = new InMemoryAnswersRepository(
       inMemoryAnswersAttachmentRepository,
+      inMemoryStudentsRepository,
     )
     sut = new DeleteAnswerUseCase(inMemoryAnswersRepository)
   })

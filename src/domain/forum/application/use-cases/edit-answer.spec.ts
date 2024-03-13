@@ -5,17 +5,21 @@ import { EditAnswerUseCase } from './edit-answer'
 import { UnauthorizedError } from '../../../../core/errors/errors/unauthorized'
 import { InMemoryAnswerAttachmentsRepository } from 'test/repositories/in-memory-answer-attachment-repository'
 import { makeAnswerAttachments } from 'test/factories/make-answer-attachments'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
 
 let inMemoryAnswersRepository: InMemoryAnswersRepository
 let inMemoryAnswersAttachmentRepository: InMemoryAnswerAttachmentsRepository
+let inMemoryStudentsRepository: InMemoryStudentsRepository
 let sut: EditAnswerUseCase
 
 describe('edit answer', () => {
   beforeEach(() => {
     inMemoryAnswersAttachmentRepository =
       new InMemoryAnswerAttachmentsRepository()
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
     inMemoryAnswersRepository = new InMemoryAnswersRepository(
       inMemoryAnswersAttachmentRepository,
+      inMemoryStudentsRepository,
     )
     sut = new EditAnswerUseCase(
       inMemoryAnswersRepository,
