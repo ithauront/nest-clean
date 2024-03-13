@@ -14465,3 +14465,370 @@ describe('get question by slug test', () => {
 
 porem agora as dependencias vao dar erro de typescript em outros testes que usam o questionsRepository (mas os testes passam mesmo assim)
 entã agora a gente vai ter que fazer a instanciação dessas duas linhas em todos os arquivos que usam o questionRepository. néao vou colocar o processo todo aqui mas é basicamente o let e o before each em cada um desses arquivos para ficar parecido com o desse teste do slug; e como a gente mudou o de answer tambem temos que colocar o student nos que usam o answer
+vamos passar teste por teste adicionando as dependencias.
+depois de tudo rodamos o teste e se passar vamos para a parte de infra
+## prisma controller question com details
+vamos mudar a cade infra para retornar os dados da pergunta com detalhes. primeiro vamos la em mappers para criar o mapper
+prisma-question-with-details-mapper.ts
+vamos colar nele o questionComment with autor
+porem nessa a gente precisa do question do user e do attachent então fazelos essa importação 
+
+import {
+  Question as PrismaQuestion,
+  User as PrismaUser,
+  Attachment as PrismaAttachment,
+  Prisma,
+} from '@prisma/client'
+e a gente faz o type dele que vai ser uma pergunta com dentro um autor e um attachment lista que vai ser um array de attachment
+type PrismaQuestionWithDetails = PrismaQuestion & {
+  author: PrismaUser
+  attachment: PrismaAttachment[]
+}
+e a gente quer converter isso que chega como raw em uma questionWithDetails
+
+export class PrismaQuestionWithDetailsMapper {
+  static toDomain(raw: PrismaQuestionWithDetails): QuestionWithDetails {
+    então vamos usar o create dessa questionQithDetails e vamos passar os campos para o slug a gente tem que fazer o slug . create e fica assim:
+    
+        slug: Slug.create(raw.slug),
+
+  para o attachment a gente vai er que criar o toDomain no mapper do attachments então vamos em prismaattachments-mapper.ts e vamos criar o toDomain
+  fica assim:
+ import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Attachment } from '@/domain/forum/enterprise/entities/attachment'
+import { Prisma, Attachment as PrismaAttachment } from '@prisma/client'
+
+export class PrismaAttachmentsMapper {
+  static toDomain(raw: PrismaAttachment): Attachment {
+    return Attachment.create(
+      {
+        title: raw.title,
+        url: raw.url,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    attachment: Attachment,
+  ): Prisma.AttachmentUncheckedCreateInput {
+    return {
+      id: attachment.id.toString(),
+      title: attachment.title,
+      url: attachment.url,
+    }
+  }
+}
+
+
+agora voltamos para o mappre do questionWithDetails
+e agora podemos reaproveitar um mapper dentro do outro e no attachments a gente usar esse mapper para passar os attachments to domain
+ attachments: raw.attachment.map(PrismaAttachmentsMapper.toDomain)
+ e o best answer id tem que verificar se ele existe ele tem que ser um new uniqueentityId rawbestanswerid sen não vai ser nulo o mapper fica assim:
+ import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { Slug } from '@/domain/forum/enterprise/entities/value-objects/slug'
+import {
+  Question as PrismaQuestion,
+  User as PrismaUser,
+  Attachment as PrismaAttachment,
+  Prisma,
+} from '@prisma/client'
+import { PrismaAttachmentsMapper } from './prisma-attachment-mapper'
+
+type PrismaQuestionWithDetails = PrismaQuestion & {
+  author: PrismaUser
+  attachment: PrismaAttachment[]
+}
+
+export class PrismaQuestionWithDetailsMapper {
+  static toDomain(raw: PrismaQuestionWithDetails): QuestionWithDetails {
+    return QuestionWithDetails.create({
+      questionId: new UniqueEntityId(raw.id),
+      authorId: new UniqueEntityId(raw.authorId),
+      content: raw.content,
+      title: raw.title,
+      author: raw.author.name,
+      slug: Slug.create(raw.slug),
+      attachments: raw.attachment.map(PrismaAttachmentsMapper.toDomain),
+      bestAnswerId: raw.bestAnswerId
+        ? new UniqueEntityId(raw.bestAnswerId)
+        : null,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+    })
+  }
+}
+
+agora podemos ir no repositorio prisma questionsreposirtory duplicamos o metodo findBySlug e mudamos o nome e ele retorna um questionWithDetails
+e ele retorna usando o mapper que acamos de criar e ai vai dar erro porque precisamos colocar o include trazendo true para author e ara attachment fica assim a pagina toda
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { PrismaQuestionWithDetailsMapper } from '../mappers/prisma-question-with-details-mapper'
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+  ) {}
+
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+      include: {
+        author: true,
+        attachment: true,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionWithDetailsMapper.toDomain(question)
+  }
+
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+
+    await this.questionAttachments.createMany(question.attachment.getItems())
+  }
+
+  async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+  }
+
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+
+    await Promise.all([
+      this.prisma.question.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.questionAttachments.createMany(question.attachment.getNewItems()),
+      this.questionAttachments.deleteMany(
+        question.attachment.getRemovedItems(),
+      ),
+    ])
+  }
+}
+
+vamos agora criar um novo presenter para isso e para retornar nesse presenter os attachment vamos fazer antes um presenter para attachment então attachment-presenter.ts fica assim:
+import { Attachment } from '@/domain/forum/enterprise/entities/attachment'
+
+export class AttachmentPresenter {
+  static toHTTP(attachment: Attachment) {
+    return {
+      id: attachment.id.toString(),
+      title: attachment.title,
+      url: attachment.url,
+    }
+  }
+}
+
+e o question-with-details-presenter.ts fica assim:
+fica assim utilizando o attachment presenter
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { AttachmentPresenter } from './attachment-presenter'
+
+export class QuestionWithDetailsPresenter {
+  static toHTTP(questionWithDetails: QuestionWithDetails) {
+    return {
+      questionId: questionWithDetails.questionId.toString(),
+      authorId: questionWithDetails.authorId.toString(),
+      author: questionWithDetails.author,
+      title: questionWithDetails.title,
+      slug: questionWithDetails.slug.value,
+      content: questionWithDetails.content,
+      attachments: questionWithDetails.attachments.map(
+        AttachmentPresenter.toHTTP,
+      ),
+      bestAnswerId: questionWithDetails.bestAnswerId?.toString(),
+      createdAt: questionWithDetails.createdAt,
+      updatedAt: questionWithDetails.updatedAt,
+    }
+  }
+}
+agora vamos no controller e mudamos ele para questinWithDetailspresenter fica assim:
+import { BadRequestException, Controller, Get, Param } from '@nestjs/common'
+import { GetQuestionBySlugUseCase } from '@/domain/forum/application/use-cases/get-question-by-slug'
+import { QuestionWithDetailsPresenter } from '../presenters/question-with-details-presenter'
+
+@Controller('/questions/:slug')
+export class GetQuestionBySlugController {
+  constructor(private getQuestionBySlug: GetQuestionBySlugUseCase) {}
+
+  @Get()
+  async handle(@Param('slug') slug: string) {
+    const result = await this.getQuestionBySlug.execute({
+      slug,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+
+    return {
+      questions: QuestionWithDetailsPresenter.toHTTP(result.value.question),
+    }
+  }
+}
+
+e agora podemos ir no teste dele no teste vamos importar tambem o attachment factory e o questionAttachmentFactory agora no teste a gente transforma a criaçéao da pergunta em uma const question
+e pegamos tambem a criação do attachment com um titulo Some Attachment e a gente usa o questionAttachmentFactory para criar um relacionamento passando o id do attachment e da question
+vamos tambem adicionar o nome ao usuario para ficar mais visivel nos testes
+e agora no expect a gente verifica se ela traz titulo que ja estava verificando mas tambem se traz o author e se traz o attachment. o teste fica assim:
+import { Slug } from '@/domain/forum/enterprise/entities/value-objects/slug'
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AttachmentFactory } from 'test/factories/make-attachemnt'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionAttachmentFactory } from 'test/factories/make-question-attachments'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('get question by slug - tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let attachmentFactory: AttachmentFactory
+  let questionAttachmentFactory: QuestionAttachmentFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AttachmentFactory,
+        QuestionAttachmentFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    questionAttachmentFactory = moduleRef.get(QuestionAttachmentFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[get]/questions/:slug', async () => {
+    const user = await studentFactory.makePrismaStudent({
+      name: 'John Doe',
+    })
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+      slug: Slug.create('question-01'),
+      title: 'Question 01',
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment({
+      title: 'Some attachment',
+    })
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const response = await request(app.getHttpServer())
+      .get('/questions/question-01')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      questions: expect.objectContaining({
+        title: 'Question 01',
+        author: 'John Doe',
+        attachments: [
+          expect.objectContaining({
+            title: 'Some attachment',
+          }),
+        ],
+      }),
+    })
+  })
+})
+
+se a gente rodar deve tuso funcionar. mas podemos tambem fazer uma checagem de tipos com o npx tsc --noEmit
+e ele vai apontar u erro la no no domain notification aplication subscribers em todos os testes vai ter erro de typescript 
+a gente instancia em todos e os erros de typescript devem sair. porem estou recebendo o erro de que o spy ta depricated
+'SpyInstance' is deprecated.ts(6385)
+index.d.ts(100, 4): The declaration was marked as deprecated here.
+(alias) interface SpyInstance<TArgs extends any[] = any[], TReturns = any>
+import SpyInstance
+@deprecated — Use MockInstance<A, R> instead
+
+No quick fixes available
+esse aviso acontece por esse motivo:
+O aviso que você encontrou indica que a interface SpyInstance da biblioteca vitest foi marcada como obsoleta (deprecated). Isso significa que os desenvolvedores da biblioteca recomendam não usar mais essa interface em novos códigos e sugerem a migração para uma alternativa recomendada, neste caso, MockInstance<A, R>.
+
+Esse tipo de aviso geralmente aparece quando uma biblioteca ou framework está evoluindo e seus mantenedores decidem melhorar a API, remover funcionalidades duplicadas ou corrigir design flaws. Marcar uma funcionalidade como obsoleta é uma forma de informar aos desenvolvedores que eles devem começar a transição para as novas recomendações, enquanto ainda mantêm compatibilidade com o código legado para não quebrar aplicações existentes de imediato.
+
+O motivo pelo qual você não viu esse aviso quando escreveu os testes originalmente é que, naquela época, a SpyInstance ainda era considerada uma parte atual e suportada da API de vitest. Desde então, uma atualização na biblioteca deve ter introduzido a nova interface MockInstance<A, R> e marcado SpyInstance como obsoleta.
+
+Os seus testes continuam passando porque a depreciação de uma funcionalidade geralmente não afeta sua funcionalidade imediatamente. Isso é feito para dar tempo aos desenvolvedores para atualizar seus códigos sem quebrar suas aplicações. No entanto, é recomendável que você atualize seu código para usar a nova interface recomendada, MockInstance<A, R>, para evitar potenciais problemas no futuro e garantir que seu código esteja alinhado com as práticas recomendadas e atualizações da biblioteca.
+
+Para atualizar seu código, você precisará substituir o uso de SpyInstance por MockInstance conforme a documentação de vitest, ajustando qualquer parte do seu código de teste que dependa dessa interface. Isso pode envolver mudar como você cria spies, mocks ou como você os utiliza nos seus testes. É uma boa prática verificar a documentação oficial ou exemplos atualizados para entender como a nova interface deve ser usada.
+eu não vou mudar ainda para manter como o codigo das aulas que ja estão terminando. porem caso de problema no futuro eu posso mudar.
+com isso essaparte esta finalizada.

@@ -15,6 +15,8 @@ import { waitFor } from 'test/utils/wait-for'
 import { OnCommentOnAnswerCreated } from './on-comment-on-answer-created'
 import { makeAnswerComment } from 'test/factories/make-answer-comment'
 import { InMemoryAnswerCommentsRepository } from 'test/repositories/in-memory-answer-comments-repository'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { InMemoryAttachmentsRepository } from 'test/repositories/in-memory-attachment-repository'
 
 let inMemoryAnswerCommentsRepository: InMemoryAnswerCommentsRepository
 let inMemoryQuestionAttachmentsRepository: InMemoryQuestionAttachmentsRepository
@@ -23,6 +25,8 @@ let inMemoryAnswerAttachmentsRepository: InMemoryAnswerAttachmentsRepository
 let inMemoryAnswersRepository: InMemoryAnswersRepository
 let inMemoryNotificationsRepository: InMemoryNotificationsRepository
 let sendNotificationUseCase: SendNotificationUseCase
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryAttachmentsRepository: InMemoryAttachmentsRepository
 let sendNotificationExecuteSpy: SpyInstance<
   [SendNotificationUseCaseRequest],
   Promise<SendNotificationUseCaseResponse>
@@ -30,16 +34,23 @@ let sendNotificationExecuteSpy: SpyInstance<
 
 describe('on comment on answer create', () => {
   beforeEach(() => {
-    inMemoryAnswerCommentsRepository = new InMemoryAnswerCommentsRepository()
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryAttachmentsRepository = new InMemoryAttachmentsRepository()
+    inMemoryAnswerCommentsRepository = new InMemoryAnswerCommentsRepository(
+      inMemoryStudentsRepository,
+    )
     inMemoryQuestionAttachmentsRepository =
       new InMemoryQuestionAttachmentsRepository()
     inMemoryQuestionsRepository = new InMemoryQuestionsRepository(
       inMemoryQuestionAttachmentsRepository,
+      inMemoryAttachmentsRepository,
+      inMemoryStudentsRepository,
     )
     inMemoryAnswerAttachmentsRepository =
       new InMemoryAnswerAttachmentsRepository()
     inMemoryAnswersRepository = new InMemoryAnswersRepository(
       inMemoryAnswerAttachmentsRepository,
+      inMemoryStudentsRepository,
     )
     inMemoryNotificationsRepository = new InMemoryNotificationsRepository()
     sendNotificationUseCase = new SendNotificationUseCase(

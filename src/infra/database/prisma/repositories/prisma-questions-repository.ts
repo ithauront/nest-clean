@@ -5,6 +5,8 @@ import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma.service'
 import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
 import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { PrismaQuestionWithDetailsMapper } from '../mappers/prisma-question-with-details-mapper'
 @Injectable()
 export class PrismaQuestionsRepository implements QuestionsRepository {
   constructor(
@@ -36,6 +38,23 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
     }
 
     return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+      include: {
+        author: true,
+        attachment: true,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionWithDetailsMapper.toDomain(question)
   }
 
   async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {

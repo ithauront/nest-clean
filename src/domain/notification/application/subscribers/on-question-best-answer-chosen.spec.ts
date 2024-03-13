@@ -13,12 +13,16 @@ import { makeQuestion } from 'test/factories/make-question'
 import { SpyInstance } from 'vitest'
 import { waitFor } from 'test/utils/wait-for'
 import { OnQuestionBestAnswerChosen } from './on-question-best-answer-chosen'
+import { InMemoryStudentsRepository } from 'test/repositories/in-memory-students-repository'
+import { InMemoryAttachmentsRepository } from 'test/repositories/in-memory-attachment-repository'
 
 let inMemoryQuestionAttachmentsRepository: InMemoryQuestionAttachmentsRepository
 let inMemoryQuestionsRepository: InMemoryQuestionsRepository
 let inMemoryAnswerAttachmentsRepository: InMemoryAnswerAttachmentsRepository
 let inMemoryAnswersRepository: InMemoryAnswersRepository
 let inMemoryNotificationsRepository: InMemoryNotificationsRepository
+let inMemoryStudentsRepository: InMemoryStudentsRepository
+let inMemoryAttachmentsRepository: InMemoryAttachmentsRepository
 let sendNotificationUseCase: SendNotificationUseCase
 let sendNotificationExecuteSpy: SpyInstance<
   [SendNotificationUseCaseRequest],
@@ -29,13 +33,18 @@ describe('on question best answer chosen', () => {
   beforeEach(() => {
     inMemoryQuestionAttachmentsRepository =
       new InMemoryQuestionAttachmentsRepository()
+    inMemoryStudentsRepository = new InMemoryStudentsRepository()
+    inMemoryAttachmentsRepository = new InMemoryAttachmentsRepository()
     inMemoryQuestionsRepository = new InMemoryQuestionsRepository(
       inMemoryQuestionAttachmentsRepository,
+      inMemoryAttachmentsRepository,
+      inMemoryStudentsRepository,
     )
     inMemoryAnswerAttachmentsRepository =
       new InMemoryAnswerAttachmentsRepository()
     inMemoryAnswersRepository = new InMemoryAnswersRepository(
       inMemoryAnswerAttachmentsRepository,
+      inMemoryStudentsRepository,
     )
     inMemoryNotificationsRepository = new InMemoryNotificationsRepository()
     sendNotificationUseCase = new SendNotificationUseCase(
