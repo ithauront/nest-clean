@@ -14832,3 +14832,379 @@ Os seus testes continuam passando porque a depreciação de uma funcionalidade g
 Para atualizar seu código, você precisará substituir o uso de SpyInstance por MockInstance conforme a documentação de vitest, ajustando qualquer parte do seu código de teste que dependa dessa interface. Isso pode envolver mudar como você cria spies, mocks ou como você os utiliza nos seus testes. É uma boa prática verificar a documentação oficial ou exemplos atualizados para entender como a nova interface deve ser usada.
 eu não vou mudar ainda para manter como o codigo das aulas que ja estão terminando. porem caso de problema no futuro eu posso mudar.
 com isso essaparte esta finalizada.
+
+# registrando eventos de dominio
+agora vamos disparar os eventos de dominio que a parte de notificaç~sa que esta desconectada da camada de infra da aplicação
+o qiue a gente vai fazer então é esse relação para que os eventossejam disparados.
+a parte de relação entre os dois subdominios não esta necessariamente relacionada ao http então o que a gente vai fazer é que no infra a gente vai criar uma nova pasta para isso chamada events
+nela vamos criar o modulo events.module.ts
+e nesse module vamos ter provavelmente imports e providers mas não controllers porque não é uma camada http fica assim por enquanto
+import { Module } from '@nestjs/common'
+
+@Module({
+  imports: [],
+  providers: [],
+})
+export class EventsModule {}
+
+agora a primeira coisa é que dentro dos nosso evetos como por exemplo on comment on question create a gente vai ter dependencias como podemos ver aqui
+  private questionsRepository: QuestionsRepository,
+    private sendNotification: SendNotificationUseCase,
+
+    então la nos vamos colocar o injectable do nest em todos os arquivos da pasta subscriber
+    e vamos tambem coocar no sendNotification que é o caso de uso que faz o envio da notificaçéao
+    agora nos vamos voltar para o modules e colocar todos os providers ou seja tudoo queesta relacionado com a parte de eventos
+    então vamos importar os subscribers e o send notification use Case
+      providers: [
+    OnAnswerCreated,
+    OnCommentOnAnswerCreated,
+    OnCommentOnQuestionCreated,
+    OnQuestionBestAnswerChosen,
+    SendNotificationUseCase,
+  ],
+  essasclasses usam tambem o questionrepository e a gente não pecisa cadastrar ele porque como eles estão cadastrados no databaseModule basta a gente importar o database module e ele vai ficar acessivel o event module completo fica assim:
+  import { OnAnswerCreated } from '@/domain/notification/application/subscribers/on-answer-created'
+import { OnCommentOnAnswerCreated } from '@/domain/notification/application/subscribers/on-comment-on-answer-created'
+import { OnCommentOnQuestionCreated } from '@/domain/notification/application/subscribers/on-comment-on-question-created'
+import { OnQuestionBestAnswerChosen } from '@/domain/notification/application/subscribers/on-question-best-answer-chosen'
+import { SendNotificationUseCase } from '@/domain/notification/application/use-cases/send-notification'
+import { Module } from '@nestjs/common'
+import { DatabaseModule } from '../database/prisma/database.module'
+
+@Module({
+  imports: [DatabaseModule],
+  providers: [
+    OnAnswerCreated,
+    OnCommentOnAnswerCreated,
+    OnCommentOnQuestionCreated,
+    OnQuestionBestAnswerChosen,
+    SendNotificationUseCase,
+  ],
+})
+export class EventsModule {}
+
+agora precisamos importar ele no nosso app module para que o nest ache ele. o app/module fica assim
+import { Module } from '@nestjs/common'
+import { ConfigModule } from '@nestjs/config'
+import { envSchema } from './env/env'
+import { AuthModule } from './auth/auth.module'
+import { HttpModule } from './http/http.module'
+import { EnvModule } from './env/env.module'
+import { EventsModule } from './events/events.module'
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      validate: (env) => envSchema.parse(env),
+      isGlobal: true,
+    }),
+    AuthModule,
+    HttpModule,
+    EnvModule,
+    EventsModule,
+  ],
+})
+export class AppModule {}
+
+porem se a gente tentar rodar a aplicação agora vai dar erro porque o nosso caso de uso de notificação depende do repositorio de notificação e as dependencias do sendnotificaitionUseCase não vao ser encontradas porque ele depende do notificationsRepository que a gente néao riou ainda na camada de dominio.
+então vamos dentro de prisma repositories e vamos criar um arquivo chamado
+prisma-notifications-reposiory.ts
+vamos colar nele o prisma questions repository para reaproveitar
+a gente muda o titulo ede onde ele implementa e tira todos os metodos que néao sejam findById create e save
+e ai a gente tira os inmports desnecessarios e da replace em todos os questions por notification.
+e ai começa a aparecer alguns erros. o primeiro dele é que não temos a tabela de notification no nosso prisma. então vamos abriro arquivo de schema para criar ela.
+ela vai ter id title content data de leitura ou seja readAt  e  notirifação vai esta associada a um usuario entéao a gente pode tirar as relaçéaes com questão que tinha antes e fazer uma para um usuario e vamos chamar esse usuatio de recipient so de colocar recipient User ele n#ao estava fazendo a relação automaticamente então eu coloquei recipient User e fui no terminal e rodei npx prisma format e ai ele fez.
+ele cria como userId e a gente vai alterar para recipientId e fazemos um map para renomear a coluna e a gente move o id para cima para ter as colunas juntas e os relacionamentos depois.
+vamos criar tambem um createdAt para ser dateTime e colocar nele um default como now() e um map para usar o underline com isso a tabela esta pronta. e vamos so na tabela user para colocar o notifications (o primeiro) com letra minuscual e s no fim para ficar no padréao o schema completo fica assim:
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+}
+
+model User {
+  id           String         @id @default(uuid())
+  name         String
+  email        String         @unique
+  password     String
+  role         UserRole       @default(STUDENT)
+  questions    Question[]
+  answers      Answer[]
+  comments     Comment[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Question {
+  id           String    @id @default(uuid())
+  title        String
+  slug         String    @unique
+  content      String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  authorId     String    @map("author_id")
+  bestAnswerId String?   @unique @map("best_answer_id")
+
+  author     User    @relation(fields: [authorId], references: [id])
+  bestAnswer Answer? @relation("bestAnswer", fields: [bestAnswerId], references: [id])
+
+  answers    Answer[]
+  comments   Comment[]
+  attachment Attachment[]
+
+  @@map("questions")
+}
+
+model Answer {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String    @map("question_id")
+
+  author       User         @relation(fields: [authorId], references: [id])
+  bestAnswerOn Question?    @relation("bestAnswer")
+  question     Question     @relation(fields: [questionId], references: [id])
+  comments     Comment[]
+  attachment   Attachment[]
+
+  @@map("answers")
+}
+
+model Comment {
+  id         String    @id @default(uuid())
+  content    String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+  authorId   String    @map("author_id")
+  questionId String?   @map("question_id")
+  answerId   String?   @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+  author   User      @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+
+model Attachment {
+  id         String  @id @default(uuid())
+  title      String
+  url        String
+  questionId String? @map("question_id")
+  answerId   String? @map("answer_id")
+
+  question Question? @relation(fields: [questionId], references: [id])
+  answer   Answer?   @relation(fields: [answerId], references: [id])
+
+  @@map("attachments")
+}
+
+model Notification {
+  id      String    @id @default(uuid())
+  recipientId    String @map("recipient_id")
+  title   String
+  content String
+  readAt  DateTime? @map("read_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  recipient User   @relation(fields: [recipientId], references: [id])
+  
+
+  @@map("notifications")
+}
+
+agora se a gente roda o npx prisma migrate dev para ele dar migration na tabela isso com o docker rodando ai ele pede para a gente da um nome para a nova migration e assim a gente cria a nova tabela.
+agora podemos voltar para o nosso repository e ele ja deve identificar a nova tabela. caso néao a gente da um restar no vscode e agora a gente vai criar o nsso mapper vamos na pasta de mappers
+prisma-notifications-mapper.ts
+copiamos o mapper de question e damos replace em todas questions para notification e vamos depois substituindo os campos.
+no entity notificaion como o readAt é opcional a gente tem que colocar ele nas props como possivelmente nulo tambem assim:
+export interface NotificationProps {
+  recipientId: UniqueEntityId
+  title: string
+  content: string
+  readAt?: Date | null
+  createdAt: Date
+}
+
+
+o mapper fica assi:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import { Notification } from '@/domain/notification/enterprise/entities/notification'
+import { Notification as PrismaNotification, Prisma } from '@prisma/client'
+
+export class PrismaNotificationMapper {
+  static toDomain(raw: PrismaNotification): Notification {
+    return Notification.create(
+      {
+        title: raw.title,
+        content: raw.content,
+        recipientId: new UniqueEntityId(raw.recipientId),
+        createdAt: raw.createdAt,
+        readAt: raw.readAt,
+      },
+      new UniqueEntityId(raw.id),
+    )
+  }
+
+  static toPrisma(
+    notification: Notification,
+  ): Prisma.NotificationUncheckedCreateInput {
+    return {
+      id: notification.id.toString(),
+      recipientId: notification.recipientId.toString(),
+      title: notification.title,
+      content: notification.content,
+      createdAt: notification.createdAt,
+      readAt: notification.readAt,
+    }
+  }
+}
+
+agora podemos voltar para o repositorio e ajustar a importação do mapper e tambem tirar as coisas de attachments por que isso era especifico do question. o repositorio fica assim:
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { NotificationsRepository } from '@/domain/notification/application/repositories/notification-repository'
+import { Notification } from '@/domain/notification/enterprise/entities/notification'
+import { PrismaNotificationMapper } from '../mappers/prisma-notifications-mapper'
+
+@Injectable()
+export class PrismaNotificationsRepository implements NotificationsRepository {
+  constructor(private prisma: PrismaService) {}
+
+  async findById(id: string): Promise<Notification | null> {
+    const notification = await this.prisma.notification.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!notification) {
+      return null
+    }
+    return PrismaNotificationMapper.toDomain(notification)
+  }
+
+  async create(notification: Notification): Promise<void> {
+    const data = PrismaNotificationMapper.toPrisma(notification)
+    await this.prisma.notification.create({
+      data,
+    })
+  }
+
+  async save(notification: Notification): Promise<void> {
+    const data = PrismaNotificationMapper.toPrisma(notification)
+
+   
+     await this.prisma.notification.update({
+        where: { id: data.id },
+        data,
+      })
+   
+  }
+}
+
+agora antes de ir no databasemodule a gente precisa ir no notification repository na camada domain e tracar por uma classe abstrata
+import { Notification } from '../../enterprise/entities/notification'
+
+export abstract class NotificationsRepository {
+  abstract findById(id: string): Promise<Notification | null>
+  abstract create(notification: Notification): Promise<void>
+  abstract save(notification: Notification): Promise<void>
+}
+
+com isso feito a gente pode ir no nosso databaseModule e criar lais um provider para ser o notificationrepository e o useClase op prisma notificationREpository.
+  {
+      provide: NotificationsRepository,
+      useClass: PrismaNotificationsRepository,
+    },
+
+e no exports a gente passa o notificationsRepository ao arquivo fica assim e ai se a gente rodar o npm run dev ele deve funcionar
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentsRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { PrismaStudentsRepository } from './repositories/prisma-students-repository'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { AttachmentsRepository } from '@/domain/forum/application/repositories/attachments-repository'
+import { PrismaAttachmentsRepository } from './repositories/prisma-attachments-repository'
+import { PrismaNotificationsRepository } from './repositories/prisma-notifications-repository'
+import { NotificationsRepository } from '@/domain/notification/application/repositories/notification-repository'
+
+@Module({
+  providers: [
+    PrismaService,
+    {
+      provide: AnswerAttachmentsRepository,
+      useClass: PrismaAnswerAttachmentsRepository,
+    },
+    { provide: AnswersRepository, useClass: PrismaAnswersRepository },
+    {
+      provide: AnswerCommentsRepository,
+      useClass: PrismaAnswerCommentsRepository,
+    },
+    {
+      provide: QuestionAttachmentsRepository,
+      useClass: PrismaQuestionAttachmentsRepository,
+    },
+    {
+      provide: QuestionCommentsRepository,
+      useClass: PrismaQuestionCommentsRepository,
+    },
+    {
+      provide: QuestionsRepository,
+      useClass: PrismaQuestionsRepository,
+    },
+    {
+      provide: StudentsRepository,
+      useClass: PrismaStudentsRepository,
+    },
+    {
+      provide: AttachmentsRepository,
+      useClass: PrismaAttachmentsRepository,
+    },
+    {
+      provide: NotificationsRepository,
+      useClass: PrismaNotificationsRepository,
+    },
+  ],
+  exports: [
+    PrismaService,
+    AnswerAttachmentsRepository,
+    AnswersRepository,
+    AnswerCommentsRepository,
+    QuestionAttachmentsRepository,
+    QuestionCommentsRepository,
+    QuestionsRepository,
+    StudentsRepository,
+    AttachmentsRepository,
+    NotificationsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+tudo funciona.
+
