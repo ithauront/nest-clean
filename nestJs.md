@@ -15208,3 +15208,130 @@ export class DatabaseModule {}
 
 tudo funciona.
 
+## testes e2e para evento de dominio
+
+vamos criar testes para validar que os evnetos estão sendo disparados e as notificação estão sendo enviadas.
+nos controllers a gente criou os testes muito proximos ao controler. na mesma pasta.
+porem no caso dos eventos a gente não vai ter controller porque eles são disparados de forma automatizada então vamos crar so os testes diretamente. mesmo que a gente tenha os testes na camada unitaria eles não garantem que esteja funcionando na camada de infra então vamos criar os testes na pasta de eventos mesmo sem ter nenhum outro arquivo alem do module. vamos criar o on-answer-created.e2e.spec.ts
+tems que lembrar que nos temos mais eventos do que a aula entéao tambem temos que criar os testes dos eventos que ele não vai criar na aula.
+vamos copiar o teste do answerquestionCreatedController para usar a mesma logica e mudar algumas coisas. mudamos o titulo. emovemos toda a parte de attachments da instanciação. porque não vamos testar os attachments
+nos vamos manter a chamada da rota de criação de answer porque como esse teste é a camada de infra não tem problema fazer isso a gente poderia fazer uma chamada diretamente para e caso a gente vai deixar a swer tambem. mas nesse caso a gente vai deixar a a chamda pela rota mesmo sem problemas.
+a gente pode tirar todas as validações e a criação de anexos e o envio deles tambem. a gente vai validar otras coisas enãtao não precisamos validar isso da rota e se a pergunta foi criada.
+a gente quer validar que a notificação foi enviada.
+porem temos que mebrar que os eventod de dominio são assincronos. então quando a gente fez os testes unitarios a gente usou o wait for para esperar ter ua resposta deles porque eles são assincronos.  então no nosso teste e2E tambem temos que levar em conta essa assincronia
+ou seja a gente não pode ir direto no banco de dados ver se a notificação ja foi criada diretamente com um expect porque ela demora alguns milisegundos para ser criada.
+então vamos criar u await waitfor(async()=>{})
+ou seja uma wait e um waitfor com uma funçéao assincrona.
+e se a gente for la no nosso test utils wait-for wque é o qrauivo que criamos com as funções de waitfor  temos o assertios que sta retornando void vamos mudar ele para que essa função que a angete passa para o waitfor ou seja essa função assync que e angete esta colocando  no nosso teste ela possa devolver algem de um void ela possa devolver tambem um promise<void>
+ */
+export async function waitFor(
+  assertions: () => void | Promise<void>,
+  maxDuration = 1000,
+e estamos fazendo isso para que la no nosso try  a gente possa usar um await assertions
+ try {
+        await assertions()
+        clearInterval(interval)
+e assim no nosso setInterval a gente tem que passar um async
+    const interval = setInterval(async () => {
+      elapsedTime += 10
+
+a gente faz isso tudo porque la nos testes unitarios o conteudo que a gente passava no waitfor não era assincrono então nao precisava ser promise o resultado nem ter os awaits e asyncs dentro das funções. porem agora no nosso teste e2E a gente quer bater no banco de dados então vai precisar ser assincrono então fazemos essa mudança no wait-for o arquivo wait for fica assim:
+/**
+ * This function loops through a function rerunning all assertions
+ * inside of it until it gets a truthy result.
+ *
+ * If the maximum duration is reached, it then rejects.
+ *
+ * @param expectations A function containing all tests assertions
+ * @param maxDuration Maximum wait time before rejecting
+ */
+export async function waitFor(
+  assertions: () => void | Promise<void>,
+  maxDuration = 1000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let elapsedTime = 0
+
+    const interval = setInterval(async () => {
+      elapsedTime += 10
+
+      try {
+        await assertions()
+        clearInterval(interval)
+        resolve()
+      } catch (err) {
+        if (elapsedTime >= maxDuration) {
+          reject(err)
+        }
+      }
+    }, 10)
+  })
+}
+
+e assim podemos dentro da nossa função la do waitfr a gengte passa assinc e podemos pegar o notificaitionOnDatabase usando o await dentro dessa função. e agora a gente pode dar o await e uma chamada no prisma.notification ou seja n o banco de dados da notificação e procurar o primeiro onde o recipientId for igual ao usario que criou a pergunta (no nosso caso o mesmo usuario criou a pergunta e a resposta então vai ser o mesmo)
+ no caso o user.id.toString()
+ agora ainda dentro do waitfor a gente espera que a notification esteja no banco de dados.
+ então podemos fazer que esperanos qe o resultado não seja nulo usando o not tobe(null ) porem mesmo com o teste criando ele ainda vai falhar porque no nosso repositorio prisma a gente não esta disparando os eventos  como no inMemory a gente dispara com o dispatchevents entéão vamos teanto ficou alguns ajustes. porem o teste por enqanto ficou assim:
+ import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+import { waitFor } from 'test/utils/wait-for'
+
+describe('On answer created tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('if send notification on answer create', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const questionId = question.id.toString()
+
+    await request(app.getHttpServer())
+      .post(`/questions/${questionId}/answers`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        content: 'New Answer',
+        attachments: [],
+      })
+
+    await waitFor(async () => {
+      const notificationOnDatabase = await prisma.notification.findFirst({
+        where: {
+          recipientId: user.id.toString(),
+        },
+      })
+      expect(notificationOnDatabase).not.toBe(null)
+    })
+  })
+})
+
