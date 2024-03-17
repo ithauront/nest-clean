@@ -15793,4 +15793,222 @@ describe('On question best answer chosen tests (e2e)', () => {
 se a gente testar ele ja funciona.
 
 a aula continua para fazer um ajuste porque nesses testes a gente esta testando o todo. e como a gente adicionou no nosso repositorio o disparo dos eventos de dominio em todos os nossos outros testes de controllers os eventos de dominio vão ser disparados. mesmo que a gente néao queira pesar a app fazendo isso.
+então seria legal a gente ter uma forma de controlar isso.
+para resolver isso vamos la na classe de evnetos no arquivo domain events
+e vamos criar um pblic static shouldRun para controlar isso e a gente inici ele como true ou seja se não passar false ele vai ser true
+export class DomainEvents {
+  private static handlersMap: Record<string, DomainEventCallback[]> = {}
+  private static markedAggregates: AggregateRoot<unknown>[] = []
+
+  public static shouldRun = true
+  e la embaixo na parte do dispatch. logo no começo a gente vai fazer uma condicional deposi da const isRegisted para que se não existir o shouldrun ele não execute a gente escreve isso dessa forma
+   if (!this.shouldRun) {
+      return
+    }
+    ou seja se não existir o shouldRun o que é igual a ele ser falso. ele retorna e não executa a o resto da função.
+    assim quando a gente passar o domainEvents shouldRun como falso nos testes de controller ele não vai disarar os domain events.
+    fica assim o arquivo de domain events
+    import { AggregateRoot } from '../entities/aggregate-root'
+import { UniqueEntityId } from '../entities/unique-entity-id'
+import { DomainEvent } from './domain-event'
+
+type DomainEventCallback = (event: unknown) => void
+
+export class DomainEvents {
+  private static handlersMap: Record<string, DomainEventCallback[]> = {}
+  private static markedAggregates: AggregateRoot<unknown>[] = []
+
+  public static shouldRun = true
+
+  public static markAggregateForDispatch(aggregate: AggregateRoot<unknown>) {
+    const aggregateFound = !!this.findMarkedAggregateByID(aggregate.id)
+
+    if (!aggregateFound) {
+      this.markedAggregates.push(aggregate)
+    }
+  }
+
+  private static dispatchAggregateEvents(aggregate: AggregateRoot<unknown>) {
+    aggregate.domainEvents.forEach((event: DomainEvent) => this.dispatch(event))
+  }
+
+  private static removeAggregateFromMarkedDispatchList(
+    aggregate: AggregateRoot<unknown>,
+  ) {
+    const index = this.markedAggregates.findIndex((a) => a.equals(aggregate))
+
+    this.markedAggregates.splice(index, 1)
+  }
+
+  private static findMarkedAggregateByID(
+    id: UniqueEntityId,
+  ): AggregateRoot<unknown> | undefined {
+    return this.markedAggregates.find((aggregate) => aggregate.id.equals(id))
+  }
+
+  public static dispatchEventsForAggregate(id: UniqueEntityId) {
+    const aggregate = this.findMarkedAggregateByID(id)
+
+    if (aggregate) {
+      this.dispatchAggregateEvents(aggregate)
+      aggregate.clearEvents()
+      this.removeAggregateFromMarkedDispatchList(aggregate)
+    }
+  }
+
+  public static register(
+    callback: DomainEventCallback,
+    eventClassName: string,
+  ) {
+    const wasEventRegisteredBefore = eventClassName in this.handlersMap
+
+    if (!wasEventRegisteredBefore) {
+      this.handlersMap[eventClassName] = []
+    }
+
+    this.handlersMap[eventClassName].push(callback)
+  }
+
+  public static clearHandlers() {
+    this.handlersMap = {}
+  }
+
+  public static clearMarkedAggregates() {
+    this.markedAggregates = []
+  }
+
+  private static dispatch(event: DomainEvent) {
+    const eventClassName: string = event.constructor.name
+
+    const isEventRegistered = eventClassName in this.handlersMap
+
+    if (!this.shouldRun) {
+      return
+    }
+
+    if (isEventRegistered) {
+      const handlers = this.handlersMap[eventClassName]
+
+      for (const handler of handlers) {
+        handler(event)
+      }
+    }
+  }
+}
+
+com isso em mãos vamos no setup end 2 end que é o arquivo que fazemos a configuração dos testesque esta dentro de utils na raiz
+no beforeAll a gente coloca o domainEvents.shouldRun = false
+ou seja em nenhulm teste end2end a gente vai disparar os eventos de dominio.
+porem agora vamos nos nossos testes de evento e passamos de volta para true.
+fica assim 
+import { config } from 'dotenv'
+import { PrismaClient } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
+import { execSync } from 'node:child_process'
+import { DomainEvents } from '@/core/event/domain-events'
+
+config({ path: '.env', override: true })
+config({ path: '.env.test', override: true })
+const prisma = new PrismaClient()
+
+function generateUniqueDatabaseURL(schemaId: string) {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('Please provide a DATABASE_URL environment variable')
+  }
+
+  const url = new URL(process.env.DATABASE_URL)
+
+  url.searchParams.set('schema', schemaId)
+
+  return url.toString()
+}
+const schemaId = randomUUID()
+beforeAll(async () => {
+  const databaseUrl = generateUniqueDatabaseURL(schemaId)
+  process.env.DATABASE_URL = databaseUrl
+
+  DomainEvents.shouldRun = false
+
+  execSync('npx prisma migrate deploy')
+})
+
+afterAll(async () => {
+  await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaId}" CASCADE`)
+  prisma.$disconnect()
+})
+
+agora vamos em cada um dos nossos testes de event na camada de infra e passamos n o before all o shouldRun como true
+import { DomainEvents } from '@/core/event/domain-events'
+import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+import { waitFor } from 'test/utils/wait-for'
+
+describe('On question best answer chosen tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    DomainEvents.shouldRun = true
+
+    await app.init()
+  })
+
+  test('if send notification on question best answer', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const answer = await answerFactory.makePrismaAnswer({
+      questionId: question.id,
+      authorId: user.id,
+    })
+
+    const answerId = answer.id.toString()
+
+    await request(app.getHttpServer())
+      .patch(`/answers/${answerId}/choose-as-best`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    await waitFor(async () => {
+      const notificationOnDatabase = await prisma.notification.findFirst({
+        where: {
+          recipientId: user.id.toString(),
+        },
+      })
+      expect(notificationOnDatabase).not.toBe(null)
+    })
+  })
+})
+
+apenas para ver como é esse exemplo assima, replicar esse domainevents no before all dos outros testes de on.
+para testar podemos executar um test end2end do eventos e um do controller para ver se esta passando. ou se conseguir passar os end2end gerais.
 
