@@ -15335,3 +15335,462 @@ describe('On answer created tests (e2e)', () => {
   })
 })
 
+## disparando o evento de dominio
+agora nos repositorios do prisma como o prisma answerRepository quando a gente cria o aanswer a gente tem que disparar o evento dela. ebt éao temos que importar o domaineEvents no plural e passar o dispachdfor agregate passando o id da answer
+DomainEvents.dispatchEventsForAggregate(answer.id)
+colocamos isso no create e no save fica assim:
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { Answer } from '@/domain/forum/enterprise/entities/answer'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerMapper } from '../mappers/prisma-answer-mapper'
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/answer-with-author'
+import { PrismaAnswerWithAuthorMapper } from '../mappers/prisma-answer-with-author-mapper'
+import { DomainEvents } from '@/core/event/domain-events'
+
+@Injectable()
+export class PrismaAnswersRepository implements AnswersRepository {
+  constructor(
+    private prisma: PrismaService,
+    private answerAttachmentsRepository: AnswerAttachmentsRepository,
+  ) {}
+
+  async findById(id: string): Promise<Answer | null> {
+    const answer = await this.prisma.answer.findUnique({
+      where: {
+        id,
+      },
+    })
+    if (!answer) {
+      return null
+    }
+
+    return PrismaAnswerMapper.toDomain(answer)
+  }
+
+  async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<Answer[]> {
+    const answer = await this.prisma.answer.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answer.map(PrismaAnswerMapper.toDomain)
+  }
+
+  async findManyByQuestionIdWithAuthor(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<AnswerWithAuthor[]> {
+    const answer = await this.prisma.answer.findMany({
+      where: { questionId },
+      include: {
+        author: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answer.map(PrismaAnswerWithAuthorMapper.toDomain)
+  }
+
+  async create(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+    await this.prisma.answer.create({
+      data,
+    })
+
+    await this.answerAttachmentsRepository.createMany(
+      answer.attachment.getItems(),
+    )
+
+    DomainEvents.dispatchEventsForAggregate(answer.id)
+  }
+
+  async delete(answer: Answer): Promise<void> {
+    await this.prisma.answer.delete({ where: { id: answer.id.toString() } })
+  }
+
+  async save(answer: Answer): Promise<void> {
+    const data = PrismaAnswerMapper.toPrisma(answer)
+
+    await Promise.all([
+      await this.prisma.answer.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.answerAttachmentsRepository.createMany(
+        answer.attachment.getNewItems(),
+      ),
+      this.answerAttachmentsRepository.deleteMany(
+        answer.attachment.getRemovedItems(),
+      ),
+    ])
+    DomainEvents.dispatchEventsForAggregate(answer.id)
+  }
+}
+
+vamos fazer igual no repositorio de question
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { PrismaQuestionWithDetailsMapper } from '../mappers/prisma-question-with-details-mapper'
+import { DomainEvents } from '@/core/event/domain-events'
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+  ) {}
+
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+      include: {
+        author: true,
+        attachment: true,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionWithDetailsMapper.toDomain(question)
+  }
+
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+
+    await this.questionAttachments.createMany(question.attachment.getItems())
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+
+  async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+  }
+
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+
+    await Promise.all([
+      this.prisma.question.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.questionAttachments.createMany(question.attachment.getNewItems()),
+      this.questionAttachments.deleteMany(
+        question.attachment.getRemovedItems(),
+      ),
+    ])
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+}
+
+om essas alterações se a gente rodar o teste de on answer created ele ja funciona.
+como temos os tambem os eventos de comentarios que não teve na aula vamos alterar tambem isso nos reposotorios de comentarios para isso ja ficar pronto e depois quando fazer os testes deles ja fucnionar.
+o repositorio de question Comment fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { QuestionComment } from '@/domain/forum/enterprise/entities/question-comment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionCommentMapper } from '../mappers/prisma-question-comment-mapper'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+import { PrismaCommentWithAuthorMapper } from '../mappers/prisma-comment-with-author-mapper'
+import { DomainEvents } from '@/core/event/domain-events'
+
+@Injectable()
+export class PrismaQuestionCommentsRepository
+  implements QuestionCommentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<QuestionComment | null> {
+    const questionComment = await this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!questionComment) {
+      return null
+    }
+    return PrismaQuestionCommentMapper.toDomain(questionComment)
+  }
+
+  async findManyByQuestionId(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<QuestionComment[]> {
+    const questionsComment = await this.prisma.comment.findMany({
+      where: { questionId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questionsComment.map(PrismaQuestionCommentMapper.toDomain)
+  }
+
+  async findManyByQuestionIdWithAuthor(
+    questionId: string,
+    { page }: PaginationParams,
+  ): Promise<CommentWithAuthor[]> {
+    const questionsComment = await this.prisma.comment.findMany({
+      where: { questionId },
+      include: {
+        author: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questionsComment.map(PrismaCommentWithAuthorMapper.toDomain)
+  }
+
+  async create(questionComment: QuestionComment): Promise<void> {
+    const data = PrismaQuestionCommentMapper.toPrisma(questionComment)
+    await this.prisma.comment.create({
+      data,
+    })
+    DomainEvents.dispatchEventsForAggregate(questionComment.id)
+  }
+
+  async delete(questionComment: QuestionComment): Promise<void> {
+    await this.prisma.comment.delete({
+      where: { id: questionComment.id.toString() },
+    })
+  }
+}
+
+e o de answer comment fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswerComment } from '@/domain/forum/enterprise/entities/answer-comment'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaAnswerCommentMapper } from '../mappers/prisma-answer-comment-mapper'
+import { CommentWithAuthor } from '@/domain/forum/enterprise/entities/value-objects/comment-with-author'
+import { PrismaCommentWithAuthorMapper } from '../mappers/prisma-comment-with-author-mapper'
+import { DomainEvents } from '@/core/event/domain-events'
+
+@Injectable()
+export class PrismaAnswerCommentsRepository
+  implements AnswerCommentsRepository
+{
+  constructor(private prisma: PrismaService) {}
+  async findById(id: string): Promise<AnswerComment | null> {
+    const answerComment = await this.prisma.comment.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!answerComment) {
+      return null
+    }
+    return PrismaAnswerCommentMapper.toDomain(answerComment)
+  }
+
+  async findManyByAnswerId(
+    answerId: string,
+    { page }: PaginationParams,
+  ): Promise<AnswerComment[]> {
+    const answersComment = await this.prisma.comment.findMany({
+      where: { answerId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answersComment.map(PrismaAnswerCommentMapper.toDomain)
+  }
+
+  async findManyByAnswerIdWithAuthor(
+    answerId: string,
+    { page }: PaginationParams,
+  ): Promise<CommentWithAuthor[]> {
+    const answerComment = await this.prisma.comment.findMany({
+      where: { answerId },
+      include: {
+        author: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return answerComment.map(PrismaCommentWithAuthorMapper.toDomain)
+  }
+
+  async create(answerComment: AnswerComment): Promise<void> {
+    const data = PrismaAnswerCommentMapper.toPrisma(answerComment)
+    await this.prisma.comment.create({
+      data,
+    })
+    DomainEvents.dispatchEventsForAggregate(answerComment.id)
+  }
+
+  async delete(answerComment: AnswerComment): Promise<void> {
+    await this.prisma.comment.delete({
+      where: { id: answerComment.id.toString() },
+    })
+  }
+}
+eu percebi que esses repositorios não tem save. não vai ser possivel editar os comentarios. mas como não tinha nas aulas. talvez seja algo a ser visto no fim do projeto.
+vamos fazer agora um teste para quando se escolhe a melhor resposta.
+na pasta infra de events vamos criar o arquivo on-question-best-answer-chosen.e2e-spec.ts
+vamos copiar o teste do controller de escolhera melhor resposta e trocamos os nomes dos testes.
+deixamos a estrutura do teste toda igual mas na hora do espect a gente tira os que estão e copiamos o expect do outro teste de eventos que criamos:
+   await waitFor(async () => {
+      const notificationOnDatabase = await prisma.notification.findFirst({
+        where: {
+          recipientId: user.id.toString(),
+        },
+      })
+      expect(notificationOnDatabase).not.toBe(null)
+    })
+    podemos tirar a nomação da chamada http como response. mas deixamos a partir do await.
+    importamos o wait for o teste fica assim:
+    import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AnswerFactory } from 'test/factories/make-answer'
+import { QuestionFactory } from 'test/factories/make-question'
+import { StudentFactory } from 'test/factories/make-student'
+import { waitFor } from 'test/utils/wait-for'
+
+describe('On question best answer chosen tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let answerFactory: AnswerFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, QuestionFactory, AnswerFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    questionFactory = moduleRef.get(QuestionFactory)
+    studentFactory = moduleRef.get(StudentFactory)
+    answerFactory = moduleRef.get(AnswerFactory)
+    prisma = moduleRef.get(PrismaService)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('if send notification on question best answer', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const answer = await answerFactory.makePrismaAnswer({
+      questionId: question.id,
+      authorId: user.id,
+    })
+
+    const answerId = answer.id.toString()
+
+    await request(app.getHttpServer())
+      .patch(`/answers/${answerId}/choose-as-best`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    await waitFor(async () => {
+      const notificationOnDatabase = await prisma.notification.findFirst({
+        where: {
+          recipientId: user.id.toString(),
+        },
+      })
+      expect(notificationOnDatabase).not.toBe(null)
+    })
+  })
+})
+
+se a gente testar ele ja funciona.
+
+a aula continua para fazer um ajuste porque nesses testes a gente esta testando o todo. e como a gente adicionou no nosso repositorio o disparo dos eventos de dominio em todos os nossos outros testes de controllers os eventos de dominio vão ser disparados. mesmo que a gente néao queira pesar a app fazendo isso.
+
