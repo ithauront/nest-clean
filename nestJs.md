@@ -16152,5 +16152,244 @@ describe('Event comment on a question (e2e)', () => {
 
 ambos arquivos passaram nos testes.
 
+## controller de leitura de notificação
+a gente teù la na parte de dominio na parte de notificaition os usecase de send e read notification. o de send não vai ter um controller porque a parte de envio de notificações vai ser apenas acionada pelos events. porem a parte de readprecisa de um controller para marcar a notificação como lida.
+então vamos na nossa pasta de controllers e criamoso arquivo
+read-notification.controller.ts
+vaos copiar nele o get question by slug controller
+vamos trocar todos os getQuestionBySlug pro readNotification a gente muda a rota para isso:
+
+@Controller('/notification/:notificationId/read')
+o metodo que vamos usar vai ser o patch porque vamos atualisar uma unica modificaçéo que vai ser o campo readAt
+vamos usar o httpCode204
+@Patch()
+  @HttpCode(204) porque assim ele não vai ter nenhum tipo de retorno
+  e ai no param a gente precisa pegar o notificationId e tambem precisamos pegar os dados do usuario para garantir que a notificação é dele mesmo então usamos o curentUser
+   async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('notificationId') notificationId: string) {
+      e ai a gente chama o useCase passando para ele o notificationId e o recipientId que vem de user.sub que éo id do usuario 
+      const result = await this.readNotification.execute({
+      notificationId,
+      recipientId: user.sub,
+    })
+
+    ai se der erro ele da um bad request
+    e podemos tirar o return porque a rota néao vai ter retorno. ficaassim
+    import {
+  BadRequestException,
+  Controller,
+  HttpCode,
+  Param,
+  Patch,
+} from '@nestjs/common'
+import { ReadNotificationUseCase } from '@/domain/notification/application/use-cases/read-notification'
+import { CurrentUser } from '@/infra/auth/current-user-decorator'
+import { UserPayload } from '@/infra/auth/jtw.strategy'
+
+@Controller('/notifications/:notificationId/read')
+export class ReadNotificationController {
+  constructor(private readNotification: ReadNotificationUseCase) {}
+
+  @Patch()
+  @HttpCode(204)
+  async handle(
+    @CurrentUser() user: UserPayload,
+    @Param('notificationId') notificationId: string,
+  ) {
+    const result = await this.readNotification.execute({
+      notificationId,
+      recipientId: user.sub,
+    })
+    if (result.isLeft()) {
+      throw new BadRequestException()
+    }
+  }
+}
+
+e agora podemos criar o teste
+read-notification.controller.e2e-spec.ts
+
+copiamos nele o teste de getquestionBy slug porem antes de modificar precisamos atualizar a criação de notificaço na factory para criar ela no banco de dados. porque a factory que temos so cria a nivel de dominio.
+a gente copia do maequestion a parte do injectable e cola no make notification e substitui todos os question por notification e ajustamos as importações fica assim:
+import { UniqueEntityId } from '@/core/entities/unique-entity-id'
+import {
+  Notification,
+  NotificationProps,
+} from '@/domain/notification/enterprise/entities/notification'
+import { PrismaNotificationMapper } from '@/infra/database/prisma/mappers/prisma-notifications-mapper'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { faker } from '@faker-js/faker'
+import { Injectable } from '@nestjs/common'
+
+export function makeNotification(
+  override: Partial<NotificationProps> = {},
+  id?: UniqueEntityId,
+) {
+  const notification = Notification.create(
+    {
+      title: faker.lorem.sentence(4),
+      recipientId: new UniqueEntityId(),
+      content: faker.lorem.sentence(10),
+      ...override,
+    },
+    id,
+  )
+
+  return notification
+}
+
+@Injectable()
+export class NotificationFactory {
+  constructor(private prisma: PrismaService) {}
+
+  async makePrismaNotification(
+    data: Partial<NotificationProps> = {},
+  ): Promise<Notification> {
+    const notification = makeNotification(data)
+
+    await this.prisma.notification.create({
+      data: PrismaNotificationMapper.toPrisma(notification),
+    })
+
+    return notification
+  }
+}
+
+agora podemos voltar para o teste e começar a fazer os ajustes mudamos os nomes dos testes
+as instanciações a gente retira os attachments e a question e coloca apenas o notification e o student
+describe('read notification controller - tests (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let notificationFactory: NotificationFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, NotificationFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    notificationFactory = moduleRef.get(NotificationFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+  ai no teste a gente cria o user e a notification
+    const user = await studentFactory.makePrismaStudent({
+      name: 'John Doe',
+    })
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const notification = await notificationFactory.makePrismaNotification({
+      recipientId: user.id,
+    })
+e a gente precisa fazer o notificationId sendo o notification.id.tostring( ) para poder passar ele na rota.
+
+e ai na const respose a gente passa a rota patch 
+ const notificationId = notification.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .patch(`/notifications/${notificationId}/read`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+  ai a gente espera que o status code seja 204 e néao esperamos nada de body então podemos retirar essa parte porem vamos fazer uma verificação no database então const notificationOnDatabase e vamos ver se o readAt esta modificado la  e para isso precisamos instanciar o prisma la nos let
+  
+describe('read notification controller - tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let notificationFactory: NotificationFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, NotificationFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    prisma = moduleRef.get(PrismaService)
+    studentFactory = moduleRef.get(StudentFactory)
+    notificationFactory = moduleRef.get(NotificationFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+  e ai a gente faz o notificationOnDatabase para pegar a onde o recipientId é o usuario e a gente verifica se o readAt dela não é nulo. fica assim
+  
+    const notificationOnDatabase = await prisma.notification.findFirst({
+      where: { recipientId: user.id.toString() },
+    })
+
+    expect(notificationOnDatabase?.readAt).not.toBeNull()
+  })
+  o teste inteiro fica assim
+  import { AppModule } from '@/infra/app.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { PrismaService } from '@/infra/database/prisma/prisma.service'
+import { INestApplication } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { NotificationFactory } from 'test/factories/make-notification'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('read notification controller - tests (e2e)', () => {
+  let app: INestApplication
+  let prisma: PrismaService
+  let studentFactory: StudentFactory
+  let notificationFactory: NotificationFactory
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule],
+      providers: [StudentFactory, NotificationFactory],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    prisma = moduleRef.get(PrismaService)
+    studentFactory = moduleRef.get(StudentFactory)
+    notificationFactory = moduleRef.get(NotificationFactory)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  test('[PATCH]/notifications/:notificationID/read', async () => {
+    const user = await studentFactory.makePrismaStudent({
+      name: 'John Doe',
+    })
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const notification = await notificationFactory.makePrismaNotification({
+      recipientId: user.id,
+    })
+
+    const notificationId = notification.id.toString()
+
+    const response = await request(app.getHttpServer())
+      .patch(`/notifications/${notificationId}/read`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send()
+
+    expect(response.statusCode).toBe(204)
+
+    const notificationOnDatabase = await prisma.notification.findFirst({
+      where: { recipientId: user.id.toString() },
+    })
+
+    expect(notificationOnDatabase?.readAt).not.toBeNull()
+  })
+})
+
+agora a gente vai no http module para cadastrar o controller e o useCase e no useCase a gente entra nele para colocar o injectable.
+e se a gente testar ja funciona.
 
 
