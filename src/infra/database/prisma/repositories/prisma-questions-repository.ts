@@ -8,11 +8,14 @@ import { QuestionAttachmentsRepository } from '@/domain/forum/application/reposi
 import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
 import { PrismaQuestionWithDetailsMapper } from '../mappers/prisma-question-with-details-mapper'
 import { DomainEvents } from '@/core/event/domain-events'
+import { CacheRepository } from '@/infra/cache/cache-repository'
+
 @Injectable()
 export class PrismaQuestionsRepository implements QuestionsRepository {
   constructor(
     private prisma: PrismaService,
     private questionAttachments: QuestionAttachmentsRepository,
+    private cacheRepository: CacheRepository,
   ) {}
 
   async findById(id: string): Promise<Questions | null> {
@@ -29,6 +32,12 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
   }
 
   async findBySlug(slug: string): Promise<Questions | null> {
+    const cacheHit = await this.cacheRepository.get(`question:${slug}:details`)
+
+    if (cacheHit) {
+      const cacheData = JSON.parse(cacheHit)
+      return cacheData
+    }
     const question = await this.prisma.question.findUnique({
       where: {
         slug,
@@ -38,7 +47,14 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
       return null
     }
 
-    return PrismaQuestionMapper.toDomain(question)
+    const questionDetails = PrismaQuestionMapper.toDomain(question)
+
+    await this.cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify(questionDetails),
+    )
+
+    return questionDetails
   }
 
   async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
@@ -84,6 +100,8 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
   async delete(question: Questions): Promise<void> {
     const data = PrismaQuestionMapper.toPrisma(question)
     await this.prisma.question.delete({ where: { id: data.id } })
+
+    await this.cacheRepository.delete(`question:${data.slug}:details`)
   }
 
   async save(question: Questions): Promise<void> {
@@ -98,6 +116,7 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
       this.questionAttachments.deleteMany(
         question.attachment.getRemovedItems(),
       ),
+      this.cacheRepository.delete(`question:${data.slug}:details`),
     ])
 
     DomainEvents.dispatchEventsForAggregate(question.id)

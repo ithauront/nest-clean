@@ -16409,12 +16409,198 @@ se a gente olhar os nossos casos de uso. ele não se importa de onde vao vir os 
 então dentro da camada de infra vamos começar a criar a estrutura de cache. vamos fazer uma pasta chamada cache dentro da pasta infra. e dentro dela vamos criar uma cache-repository.ts
 nele vamos criar uma classe abstrata (porque o prisma pede que repositorios sejam classes abstratas) e dentro dele vamos colocar alguns metoso abstratos tambem. vamos começar com metodos simples set (para salvar uma informação ) temos que lebrar que o cache geralmente ( e no nosso caso) não vai ser um banco relacional então ele vai seguir uma estrutura igual a de um objeto de chave valor. então no nosso set vamos tar isso então por exemplo se a gente for salvar uos detalhes de question a gente vai fazer algo como a key dela vai ser 'question:id:details': { e aqui vamos ter uma string como os attachments autor, respostas etc isso é o value}
 o redis até aceita o value como não sendo string mas ai a gente comocaria uma complexidade néao necessaria para agora. porque o objeto que serai o value a gente salvaria numa string com  o json stringfy. isso porqeu nos não vamos filtrar e percorrer esses dados. porque nos não vamos fazer query neles.
-e tambem vamos ter o get que não vai ter o value ele so vai ter a chave porque vamos achar as coisas la pela chave e vamos ter tambem o delete para deletar uma informação do cache. com esses tres metodos a gente pode savar buscar e deletar a gente chama deletar de invalidaçéao do cache. por exemplo se alguem mexer em uma informação cruxial da pergunta como por exemplo modificar o titulo a gente pode deletar a pergunta porque podemos querer que o cache tenha sempre as informações cruxiais atualizadas.
+e tambem vamos ter o get que não vai ter o value ele so vai ter a chave porque vamos achar as coisas la pela chave e ele vai devolver a string que achou la com esse alor ou um nulo caso não ache nada na pesquisa e vamos ter tambem o delete para deletar uma informação do cache. com esses tres metodos a gente pode savar buscar e deletar a gente chama deletar de invalidaçéao do cache. por exemplo se alguem mexer em uma informação cruxial da pergunta como por exemplo modificar o titulo a gente pode deletar a pergunta porque podemos querer que o cache tenha sempre as informações cruxiais atualizadas.
 fica assim:
 export abstract class CacheRepository {
   abstract set(key: string, value: string): Promise<void>
-  abstract get(key: string): Promise<void>
+  abstract get(key: string): Promise<string | null>
   abstract delete(key: string): Promise<void>
+}
+## integrando cache no prisma
+agora vamos entrar no repositorio onde nos queremos colocar cache. no caso vai ser o prisma-questions-reporitory e vamos começar colocando a dependencia do cacherepository como o private la no constructor
+constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+    private cacheRepository: CacheRepository,
+  ) {}
+
+e no metodo de indDetails by slug a gente vai integrar essa parte de cache.
+que vai ser no primeiro momento quando o usuario carregar os dados da pergunta a gente vai salvar isso em cache. então la quando a gente converte para o dominio a gente vai tambem salvar em cache.
+transformarmos o toDomain em uma const e retornamos essa const e tambem salvamos essa const no cache usando o cacheRepository.set() e dentro dele a gente vai dar uma chave que precisa ser unica e no redis a gente geralmente separa a chave com : a gente separa com : porque por exemplo a gente pode ter uma pergunta com id 1 fica question:1 e ai dessa pergunta a gente pode ter dois caches salvos um de details e um de reputação fica question:1:details e question:1:reputation assim a gente consegue diferenciar as coisas. separamos por "categoria" isso é importante porque no redis se a gente quiser deletar question:1 ele vai deletar todas as informações que tem o question:1 no caso o reputation e o details. se a gente não separar por: o redis néao vai encontrar facilmente tudo da question:1
+é importante tambem quando vamos salvar em cache lembrar de ter informações na chave (key) que vao ser identificadores. a gente usa aqui o id mas poderia ser outra coisa. no caso do nosso find by slug a gente vai usar o slug. etão vamos compor o key desse set assim question:slug:details 
+    await this.cacheRepository.set(`question:${slug}:details`) e agora temos que colocar o value
+    que vai ser o json stringfy no questiondetails
+      await this.cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify(questionDetails),
+    )
+
+    agora o que a gente vai fazer é no inicio do metodo;, ou seja a primeira vez que o usuario usar esse metodo a gente quer que ele calcule la pegano do banco de dados todas as informaç~es e entregue para o usuario salvando uma copia no cacherepository
+    quando o segundo usuario usar o metodo a gente quer ver se essa informação não ja esta la no cache. ent~~ao no inicio do metodo a gente vai fazer um const cacheHit buscando la no repositorio com o get essa mesma chave que a gente passou.
+       const cacheHit = await this.cacheRepository.get(`question:${slug}:details`)
+
+se algo foi encontrado no cache a gente vai pegar isso usando o json.parse no cacheHit porque a gente tinha antes usado o stringfy e agora a gente retransforma para objeto e retornamos esses dados com o return cacheData
+    if (cacheHit) {
+      const cacheData = JSON.parse(cacheHit)
+      return cacheData
+    }
+    e ai com esse retorno ele nem vai executar o resto do codigo ou seja ele achou no cache ele devolve o cache e acaba, se não ele executa o resto do codigo para buscar no banco de dados;
+    fica assim:
+    async findBySlug(slug: string): Promise<Questions | null> {
+    const cacheHit = await this.cacheRepository.get(`question:${slug}:details`)
+
+    if (cacheHit) {
+      const cacheData = JSON.parse(cacheHit)
+      return cacheData
+    }
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    const questionDetails = PrismaQuestionMapper.toDomain(question)
+
+    await this.cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify(questionDetails),
+    )
+
+    return questionDetails
+  }
+
+e agora vamos no metodo save para invalidar o cache sempre que houver alterações no banco de dados.
+então dentro do promise all a gente vai dar umthis.cache.delete 
+   this.cacheRepository.delete(`question:${data.slug}:details`),
+   usamos o data.slug porque o data ja era a questão que achamos no banco de dados. caso a gente quisesse deletar tudo relacionado a essa question a gente poderia usar o prefixo como a gente falou antes assim:
+      this.cacheRepository.delete(`question:${data.slug}:*`),
+  coloquei tambem no metodo deletemesmo que não tinha isso na aula. a pagina do repositorio fica assim:
+  import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { PrismaQuestionWithDetailsMapper } from '../mappers/prisma-question-with-details-mapper'
+import { DomainEvents } from '@/core/event/domain-events'
+import { CacheRepository } from '@/infra/cache/cache-repository'
+
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+    private cacheRepository: CacheRepository,
+  ) {}
+
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const cacheHit = await this.cacheRepository.get(`question:${slug}:details`)
+
+    if (cacheHit) {
+      const cacheData = JSON.parse(cacheHit)
+      return cacheData
+    }
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    const questionDetails = PrismaQuestionMapper.toDomain(question)
+
+    await this.cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify(questionDetails),
+    )
+
+    return questionDetails
+  }
+
+  async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+      include: {
+        author: true,
+        attachment: true,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionWithDetailsMapper.toDomain(question)
+  }
+
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+
+    await this.questionAttachments.createMany(question.attachment.getItems())
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+
+  async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+
+    await this.cacheRepository.delete(`question:${data.slug}:details`)
+  }
+
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+
+    await Promise.all([
+      this.prisma.question.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.questionAttachments.createMany(question.attachment.getNewItems()),
+      this.questionAttachments.deleteMany(
+        question.attachment.getRemovedItems(),
+      ),
+      this.cacheRepository.delete(`question:${data.slug}:details`),
+    ])
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
 }
 
 
