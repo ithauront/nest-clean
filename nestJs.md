@@ -16392,4 +16392,31 @@ describe('read notification controller - tests (e2e)', () => {
 agora a gente vai no http module para cadastrar o controller e o useCase e no useCase a gente entra nele para colocar o injectable.
 e se a gente testar ja funciona.
 
+## criando repositorio de cache
+cache é algo que utilizamos para otimizar performace de alguma ação que demora um pouco mais de tempo, principalmente uma ação de busca de dados. 
+imagina uma consulta no banco de dados que busque dados de tres tabelas
+uma pergunta batem em tabel de resposta, na tabela de usuario e na tabela de comentarios por exemplo e na de question. uma so consulta pode bater em 4 tabelas assim temos uma consulta que pode ser pesada.
+e se pensarmos a tabela de perguntas dificilmente vai mudar então podemo talvez armazenar os dados em cache para que quando varios usuarios fizerem a mesma requisição sobre a mesma pergunta apenas a requisição do primeiro usuario vai realmente bater nos bancos de dados.
+porem temos que ter cuidado porque cache é algo bem dificil de lidar em largaescala
+se a gente criasse um cache para a pergunta 1 a gente estaria salvando os dados de maneira estatica por exemplo oautor da pergunta que dificilmente(ou nunca) vai mudar poreù se a gente salvar junto no cache uma lista das 3 respostas mais recentes. isso pode mudar uma respostapode ser apagada ou outras entrarem e o cache ainda vai conter as mesmas tres
+então temos que entender que trabalhando com cache a gente vai ter que se contentar a as vezes estar trabalhando com informações desatualizadas. isso é normal e acontece, o que não podemos é deixar aquela informação desatualizada para sempre.
+até por isso a gente não pode colocar cache em toda aplicação. por exemplo n,a nossa aplicação pode não fazer muito sentido colocar cache na listagem de perguntas porque podemos talvez ter novas perguntas surgindo a cada minutos. alem disso o cache para listagem de perguntas é um pouco mais complexo, ele tem listagem e tudo mais ai a depender da pagina que o usuario esta o cache tem que ser outro, ai se a gente tiver ul filtro na lista, fica ainda mais cimplicado. etão é melhor colocar cache em informações que ja por padrão é dificil de mudar. a gente olha para um recurso na aplicação e nos perguntamos, é normal isso atualizar com frequencia? ou algo que se 15 pessoas acessarem em um intervalo de 15 minutos elas vão ver a mesma coisa? se a resposta for sim a gente pode fazer um cache, e isso significa que o primeiro usuasrio que acessar vai sim bater no banco de dados e vai trazer todas aquelas infos e elas vao ser salvas no cache e os proximos usuarios que acessarem nos proximos X minutos vao pegar as infos que foram salvas no cache (algum serviço que geralmente é muito mais performatico para leitura e escrita de dados não relacionados) e não no direto do banco de dados. 
+esse serviço segue uma estrutura de chave e valor. chamado banco de dados nocycle. existem varios como dragonfly redis. o redis é o mais famoso.
+então vamos começar a ver isso na nossa aplicação afgora.
+## implementação de cache
+a primeira cisa a saber é que cache é especificamente da camada de infra da aplicação. não faz sentido a camadade dominio ter qualquer menção ao cache
+se a gente olhar os nossos casos de uso. ele não se importa de onde vao vir os detalhes das requisições dele, se véao vir do inmemory, do prisma ou de onde quer ue seja (agora do cache) o caso de uso não faz menção a isso. ele so diz para pegar a indormação usando um metodo que esta no repositorio. ou seja o if que vamos fazer para ver se a informação que queremos esta no cache e se não então devemos buscala no banco de dados não é uma regra de negocio da aplicação. não é uma coisa realmente necessaria para o fucnionamento da aplicação e sim uma amelhoração de eficiencia, uma otimização e nos fazemos isso pela camada apenas de infra.
+então dentro da camada de infra vamos começar a criar a estrutura de cache. vamos fazer uma pasta chamada cache dentro da pasta infra. e dentro dela vamos criar uma cache-repository.ts
+nele vamos criar uma classe abstrata (porque o prisma pede que repositorios sejam classes abstratas) e dentro dele vamos colocar alguns metoso abstratos tambem. vamos começar com metodos simples set (para salvar uma informação ) temos que lebrar que o cache geralmente ( e no nosso caso) não vai ser um banco relacional então ele vai seguir uma estrutura igual a de um objeto de chave valor. então no nosso set vamos tar isso então por exemplo se a gente for salvar uos detalhes de question a gente vai fazer algo como a key dela vai ser 'question:id:details': { e aqui vamos ter uma string como os attachments autor, respostas etc isso é o value}
+o redis até aceita o value como não sendo string mas ai a gente comocaria uma complexidade néao necessaria para agora. porque o objeto que serai o value a gente salvaria numa string com  o json stringfy. isso porqeu nos não vamos filtrar e percorrer esses dados. porque nos não vamos fazer query neles.
+e tambem vamos ter o get que não vai ter o value ele so vai ter a chave porque vamos achar as coisas la pela chave e vamos ter tambem o delete para deletar uma informação do cache. com esses tres metodos a gente pode savar buscar e deletar a gente chama deletar de invalidaçéao do cache. por exemplo se alguem mexer em uma informação cruxial da pergunta como por exemplo modificar o titulo a gente pode deletar a pergunta porque podemos querer que o cache tenha sempre as informações cruxiais atualizadas.
+fica assim:
+export abstract class CacheRepository {
+  abstract set(key: string, value: string): Promise<void>
+  abstract get(key: string): Promise<void>
+  abstract delete(key: string): Promise<void>
+}
+
+
+
 
