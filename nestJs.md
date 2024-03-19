@@ -16603,6 +16603,192 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
   }
 }
 
+## serviços para cache
+agora que temos isso no nosso repositorio a gente tem que colocar no ar um serviço para o cache e qaui vamos configurar isso.
+vamos usar o redis então temos que criar um serviço nele
+mas vamos na pasta cache e vamos criar uma pasta redis la dentro da mesma forma que a gente criou a pasta prisma para criar o prismaservice
+então dentro da pastaredis a gente vai ter o arquivo redis.service.ts
+e vamos instalar o redis na aplicação. existem duas bibliotecas para o redis, a redis e a ioredis
+e gente vai usar a ioredis porque essa permite que a gente trabalhe com promises async await diferente das outras.
+npm i ioredis
+e agora la no redis service a gente importa o redis de ioredis e exporta a classe redisservice que extende o redis
+import { Redis } from 'ioredis'
+
+export class RedisService extends Redis {}
+
+isso porque o redis que a gente importou é uma classe, então se a gente derum new na redisservice ele vai trazer tiudo que a redis ja tem e ai dentro da classe a gente chama o constructor com o metodo super e nele a gente pode passar algumas informações
+o host que vai ser o endereço onde o redis esta executando  a gente geralmente usa o endereço ip então seria 127.0.0.1
+a porta padrão do redis é a 6379
+e o db que podemos configurar
+no redis é interessante que n éao conseguimos separar os dados por u banco de dados nomeado. então  no db a gente podeseparar por banco de dados, mas não pode passar nome e sim numeros, por padrão ele é 0 mas a gente pode dizer por exemplo que vai ser 1 ou 2 ou etc. nos vamos deixar 0
+import { Redis } from 'ioredis'
+
+export class RedisService extends Redis {
+  constructor() {
+    super({
+      host: '127.0.0.1',
+      port: 6379,
+      db: 0,
+    })
+  }
+}
+
+vamos tambem implementar o onModuleDestroi logo apos o extendsredis e ai com isso esse onModuledestroy é um hook do nest para quando a aplicação for derrubada a gente falar o que queremos fazer com essa instancia. e nesse caso a gente vai dizer para desconectar. no prisma temo tambem o onMouleInit mas no redis isso não é necessario.porque a conexão é feita automaticamente assim que a gente da um new redis
+fica assim o redisService:
+import { OnModuleDestroy } from '@nestjs/common'
+import { Redis } from 'ioredis'
+
+export class RedisService extends Redis implements OnModuleDestroy {
+  constructor() {
+    super({
+      host: '127.0.0.1',
+      port: 6379,
+      db: 0,
+    })
+  }
+
+  onModuleDestroy() {
+    return this.disconnect()
+  }
+}
+
+e agora a gente precisa configurar isso tudo então vamos la no nosso arquivo env/env.ts e adicionamos o redis_host que precisa ser uma string opicional e com default de 127.0.0.1 no port a gente faz parecido com o que fizemos para a portda aplicação porem o default vai ser 6379 e o regisdb a gente faz igual a port mas o deafault vai ser 0 fica assim o arquivo env
+import { z } from 'zod'
+
+export const envSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  PORT: z.coerce.number().optional().default(3333),
+  JWT_PRIVATE_KEY: z.string(),
+  JWT_PUBLIC_KEY: z.string(),
+  AWS_BUCKET_NAME: z.string(),
+  CLOUDFLARE_ID: z.string(),
+  AWS_ACCESS_KEY_ID: z.string(),
+  AWS_SECRET_KEY_ID: z.string(),
+  REDIS_HOST: z.string().optional().default('127.0.0.1'),
+  REDIS_PORT: z.coerce.number().optional().default(6379),
+  REDIS_DB: z.coerce.number().optional().default(0),
+})
+
+export type Env = z.infer<typeof envSchema>
+
+a gente não precisa criar essas variaveis ambientes no nosso .env porque como elas tem valores padrão vasta sair usando.
+ai agora no nosso constructor do redisSErvice a gente vai receber o envService e agora usando o envService ele fica assim o nosso redis.service
+import { EnvService } from '@/infra/env/env.service'
+import { OnModuleDestroy } from '@nestjs/common'
+import { Redis } from 'ioredis'
+
+export class RedisService extends Redis implements OnModuleDestroy {
+  constructor(envService: EnvService) {
+    super({
+      host: envService.get('REDIS_HOST'),
+      port: envService.get('REDIS_PORT'),
+      db: envService.get('REDIS_DB'),
+    })
+  }
+
+  onModuleDestroy() {
+    return this.disconnect()
+  }
+}
+
+e agora com isso pronto a gente vaina nossa pasta cache e podemos criar um cache.module.ts e fazemos uma classe com tambem o @module
+ import { Module } from '@nestjs/common'
+
+@Module({})
+export class CacheModule {}
+
+agora dentro desse module a gente vai imortar o envmodule porque como ele esta sendo usado no envService ele vai precisar do envmodule e vamos criar um providers que porenquanto vai ser apenas o envService fica assim por enquanto:
+import { Module } from '@nestjs/common'
+import { EnvModule } from '../env/env.module'
+import { EnvService } from '../env/env.service'
+
+@Module({
+  imports: [EnvModule],
+  providers: [EnvService],
+})
+export class CacheModule {}
+
+agora vamos no database module 
+vamos importar o cachemodule, porque é dentro do repositorio de question que vamos usar o cache então ele precisa estar impotado no modulo que usa ele. 
+fica assim:
+import { Module } from '@nestjs/common'
+import { PrismaService } from './prisma.service'
+import { PrismaAnswerAttachmentsRepository } from './repositories/prisma-answer-attachments-repository'
+import { PrismaAnswersRepository } from './repositories/prisma-answers-repository'
+import { PrismaAnswerCommentsRepository } from './repositories/prisma-answer-comments-repository'
+import { PrismaQuestionAttachmentsRepository } from './repositories/prisma-question-attachments-repository'
+import { PrismaQuestionCommentsRepository } from './repositories/prisma-question-comments-repository'
+import { PrismaQuestionsRepository } from './repositories/prisma-questions-repository'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { StudentsRepository } from '@/domain/forum/application/repositories/students-repository'
+import { PrismaStudentsRepository } from './repositories/prisma-students-repository'
+import { AnswerAttachmentsRepository } from '@/domain/forum/application/repositories/answer-attachments-repository'
+import { AnswerCommentsRepository } from '@/domain/forum/application/repositories/answer-comments-repository'
+import { AnswersRepository } from '@/domain/forum/application/repositories/answers-repository'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionCommentsRepository } from '@/domain/forum/application/repositories/question-comments-repository'
+import { AttachmentsRepository } from '@/domain/forum/application/repositories/attachments-repository'
+import { PrismaAttachmentsRepository } from './repositories/prisma-attachments-repository'
+import { PrismaNotificationsRepository } from './repositories/prisma-notifications-repository'
+import { NotificationsRepository } from '@/domain/notification/application/repositories/notification-repository'
+import { CacheModule } from '@/infra/cache/cache.module'
+
+@Module({
+  imports: [CacheModule],
+  providers: [
+    PrismaService,
+    {
+      provide: AnswerAttachmentsRepository,
+      useClass: PrismaAnswerAttachmentsRepository,
+    },
+    { provide: AnswersRepository, useClass: PrismaAnswersRepository },
+    {
+      provide: AnswerCommentsRepository,
+      useClass: PrismaAnswerCommentsRepository,
+    },
+    {
+      provide: QuestionAttachmentsRepository,
+      useClass: PrismaQuestionAttachmentsRepository,
+    },
+    {
+      provide: QuestionCommentsRepository,
+      useClass: PrismaQuestionCommentsRepository,
+    },
+    {
+      provide: QuestionsRepository,
+      useClass: PrismaQuestionsRepository,
+    },
+    {
+      provide: StudentsRepository,
+      useClass: PrismaStudentsRepository,
+    },
+    {
+      provide: AttachmentsRepository,
+      useClass: PrismaAttachmentsRepository,
+    },
+    {
+      provide: NotificationsRepository,
+      useClass: PrismaNotificationsRepository,
+    },
+  ],
+  exports: [
+    PrismaService,
+    AnswerAttachmentsRepository,
+    AnswersRepository,
+    AnswerCommentsRepository,
+    QuestionAttachmentsRepository,
+    QuestionCommentsRepository,
+    QuestionsRepository,
+    StudentsRepository,
+    AttachmentsRepository,
+    NotificationsRepository,
+  ],
+})
+export class DatabaseModule {}
+
+a gente salva isso mas se tentarmos rodar a aplicação agora vai dar erro porque o repositorio ainda não foi implementado a gente so criou a interface do cacherepository. a gente tem que agora fazer a implementação do redis com o cace repository.
+
+
 
 
 
