@@ -16933,3 +16933,267 @@ import { RedisService } from './redis/redis.service'
   exports: [CacheRepository],
 })
 export class CacheModule {}
+e a aplicação ja ta girando.
+
+vamos agora fazer testes para a parte de cache para garantir que esta tudo funcionando.
+e essa parte de cache não esta necessariamente associada aos controllers. a gente tem sim um controller para ela para buscar os detalhes da pergunta porem a isso não é uma regra o cache não precisava ser chamado apenas por um controller, ele podia ser chamado por qualquer coisa. o que a gente pode fazer aqui é criar um teste dentro do proprio repositorio. eentão em repositories a gente pode criar um arquivo chamada prisma-question-repository.e2e-spec.ts
+vamos nos controllers e pegamos o teste de question by slug e jogamos nesse arquivo pra servir de modelo
+vamos trocar o nome para prisma test repository e2e e nos vamos precisar manter todos os factories mas vamos adicionar tambem o cacheRepository nos imports colocamos o cacheodule
+e depois pegamos o cacherepositori com o moduleRef
+e vamos tambem usar o questionRepository porque vamos lançar o metodo findDetailsBySlug direto do repositorio nos não vamos usar a rota (apesar de que poderiamos) 
+describe('Prisma Questions Repository (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let attachmentFactory: AttachmentFactory
+  let questionAttachmentFactory: QuestionAttachmentFactory
+  let cacheRepository: CacheRepository
+  let questionRepository: QuestionsRepository
+  let jwt: JwtService
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule, CacheModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AttachmentFactory,
+        QuestionAttachmentFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    questionAttachmentFactory = moduleRef.get(QuestionAttachmentFactory)
+    cacheRepository = moduleRef.get(CacheRepository)
+    questionRepository = moduleRef.get(QuestionsRepository)
+    jwt = moduleRef.get(JwtService)
+
+    await app.init()
+  })
+
+  vamos tambem mudar o nome do teste para can cache question details vamos tambem deixar mais simples o teste tirar o nome da criação do user a criação da question so vai ter o authorId
+    test('if can cache question details', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const accessToken = jwt.sign({ sub: user.id.toString() })
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    e abaixo disso a gente remove tudo.
+    e como vamos pegar os detalhes pelo slug q gente precisa criar o slug
+    e como não vai ter rota não vamos precisar do accesstoken então podemos tirar tudo do jwt dele com o slug em mãos a gente faz uma chamada direto no questionsRepository para find details by slug
+        const slug = question.slug.value
+
+    const questionDetails = await questionRepository.findDetailsBySlug(slug)
+    e agora a gente vai verificar se os dados foram cacheados então vamos la no cacherepository e damos o get passando a key 
+      const questionDetails = await questionRepository.findDetailsBySlug(slug)
+    const cached = await cacheRepository.get(
+      `question:${question.slug}:details`,
+    )
+    e agora a gente quer que esse cache que ele traz seja igual a json stringfy question details
+     expect(cached).toEqual(JSON.stringify(questionDetails)) o teste fica assim:
+     import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { AppModule } from '@/infra/app.module'
+import { CacheRepository } from '@/infra/cache/cache-repository'
+import { CacheModule } from '@/infra/cache/cache.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import { AttachmentFactory } from 'test/factories/make-attachemnt'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionAttachmentFactory } from 'test/factories/make-question-attachments'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Prisma Questions Repository (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let attachmentFactory: AttachmentFactory
+  let questionAttachmentFactory: QuestionAttachmentFactory
+  let cacheRepository: CacheRepository
+  let questionRepository: QuestionsRepository
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule, CacheModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AttachmentFactory,
+        QuestionAttachmentFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    questionAttachmentFactory = moduleRef.get(QuestionAttachmentFactory)
+    cacheRepository = moduleRef.get(CacheRepository)
+    questionRepository = moduleRef.get(QuestionsRepository)
+
+    await app.init()
+  })
+
+  test('if can cache question details', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    const questionDetails = await questionRepository.findDetailsBySlug(slug)
+    const cached = await cacheRepository.get(
+      `question:${slug}:details`,
+    )
+    expect(cached).toEqual(JSON.stringify(questionDetails))
+  })
+})
+
+porem se a gente rodasse ia dar erro porque no prisma question repositorio a gente tinha feito a implementação no findquestionBySlug e não no finddetails. então eu tive que alterar o repositorio. agora o repositorio fica assim:
+import { PaginationParams } from '@/core/repositories/pagination-params'
+import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { Questions } from '@/domain/forum/enterprise/entities/questions'
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../prisma.service'
+import { PrismaQuestionMapper } from '../mappers/prisma-question-mapper'
+import { QuestionAttachmentsRepository } from '@/domain/forum/application/repositories/question-attachments-repository'
+import { QuestionWithDetails } from '@/domain/forum/enterprise/entities/value-objects/question-with-details'
+import { PrismaQuestionWithDetailsMapper } from '../mappers/prisma-question-with-details-mapper'
+import { DomainEvents } from '@/core/event/domain-events'
+import { CacheRepository } from '@/infra/cache/cache-repository'
+
+@Injectable()
+export class PrismaQuestionsRepository implements QuestionsRepository {
+  constructor(
+    private prisma: PrismaService,
+    private questionAttachments: QuestionAttachmentsRepository,
+    private cacheRepository: CacheRepository,
+  ) {}
+
+  async findById(id: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        id,
+      },
+    })
+
+    if (!question) {
+      return null
+    }
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findBySlug(slug: string): Promise<Questions | null> {
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    return PrismaQuestionMapper.toDomain(question)
+  }
+
+  async findDetailsBySlug(slug: string): Promise<QuestionWithDetails | null> {
+    const cacheHit = await this.cacheRepository.get(`question:${slug}:details`)
+    if (cacheHit) {
+      const cacheData = JSON.parse(cacheHit)
+      return cacheData
+    }
+    const question = await this.prisma.question.findUnique({
+      where: {
+        slug,
+      },
+      include: {
+        author: true,
+        attachment: true,
+      },
+    })
+    if (!question) {
+      return null
+    }
+
+    const questionDetails = PrismaQuestionWithDetailsMapper.toDomain(question)
+    await this.cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify(questionDetails),
+    )
+    return questionDetails
+  }
+
+  async findManyRecent({ page }: PaginationParams): Promise<Questions[]> {
+    const questions = await this.prisma.question.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: (page - 1) * 20,
+    })
+
+    return questions.map(PrismaQuestionMapper.toDomain)
+  }
+
+  async create(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.create({
+      data,
+    })
+
+    await this.questionAttachments.createMany(question.attachment.getItems())
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+
+  async delete(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+    await this.prisma.question.delete({ where: { id: data.id } })
+
+    await this.cacheRepository.delete(`question:${data.slug}:details`)
+  }
+
+  async save(question: Questions): Promise<void> {
+    const data = PrismaQuestionMapper.toPrisma(question)
+
+    await Promise.all([
+      this.prisma.question.update({
+        where: { id: data.id },
+        data,
+      }),
+      this.questionAttachments.createMany(question.attachment.getNewItems()),
+      this.questionAttachments.deleteMany(
+        question.attachment.getRemovedItems(),
+      ),
+      this.cacheRepository.delete(`question:${data.slug}:details`),
+    ])
+
+    DomainEvents.dispatchEventsForAggregate(question.id)
+  }
+}
+
+agora com isso ele ja passa. so temos que lembrar de sempre rodar o docker usando o sudo docker compose up -d
+tem que ter o sudo se não a imagem do cache não roda.
+
