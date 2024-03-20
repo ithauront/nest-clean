@@ -16788,7 +16788,148 @@ export class DatabaseModule {}
 
 a gente salva isso mas se tentarmos rodar a aplicação agora vai dar erro porque o repositorio ainda não foi implementado a gente so criou a interface do cacherepository. a gente tem que agora fazer a implementação do redis com o cace repository.
 
+## implementando cache com redis
+para isso a gente precisa no docker-compose.yml criar tambem o container do cache
+na mesma identação do postgress a gente vai criar um novo que vamos chamar de cache
+colocamos o nome e na image a gente vai usar a imagem do redis
+cache:
+    container_name: nest-clean-cache
+    image: redis
+    a imagem do redis é otima para desenvolvimento para produção a gente usaria a bitnami porque ela ja tem melhores configurações de segurança. las aqui a gente vai usar a redis mesmo.
+    no ports a gente ai usar usar a 
+      ports:
+      - 6379:6379
+
+    no volumes a gente vai fazer uma pasta redis dentro da pasta data e a gente vai pegar e mapear essa pasta para a pasta data dessa forma:
+     volumes:
+      - ./data/redis:/data
+    fica assim:
+ version: '3.8'
+
+services:
+  postgres:
+    container_name: nest-clean-pg
+    image: postgres
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: docker
+      POSTGRES_DB: nest-clean
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  
+  cache:
+    container_name: nest-clean-cache
+    image: redis
+    ports:
+      - 6379:6379
+    volumes:
+      - ./data/redis:/data
 
 
+volumes:
+  pgdata:
 
+a gente precisa colocar esse volumes e pgdata vazio no fim.
 
+e a gente da um docker compose up
+ou sudo docker compose up
+e ai ele ja mostra que o cache esta como started:
+] Running 2/2
+ ✔ Container nest-clean-cache  Started                                     0.4s 
+ ✔ Container nest-clean-pg     Running                                     0.0s 
+➜  nest-clean git:(master) ✗ 
+
+com isso funcionanando a gente vai criar a implmentação do repositorio então vamos na pasta redis e criamos o redis-cache-repository.ts
+e fazemos uma classe ingetavel para ele que vai impleentar o repositorio do cache e a gente ja coloca os metodos pelo emmet fica assim e colocamos tambem o constructor que vai ser injetado pelo ingectable no constructor vai ter o redis service:
+import { Injectable } from '@nestjs/common'
+import { CacheRepository } from '../cache-repository'
+import { RedisService } from './redis.service'
+
+@Injectable()
+export class RedisCacheRepository implements CacheRepository {
+  constructor(private redis: RedisService) {}
+  set(key: string, value: string): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+
+  get(key: string): Promise<string | null> {
+    throw new Error('Method not implemented.')
+  }
+
+  delete(key: string): Promise<void> {
+    throw new Error('Method not implemented.')
+  }
+}
+e agora vamos criar cada um dos metodos que vai ser bem simples vamos dar um this.redis. e ai aparece todos os metodos que o redis tem. ele tem metodos simples como set e get e tambem metodos mais completos para por exemplo lidar com hash lidar com lista todos metodos que começam com l tratam de lista os de h tratam de hash. da pra trabalhar com muita coisa com ele.  então no set vamos usar o metodo set do redis e passamos a key e o value porem ele tem um terceiro parametro o terceiro parametro é  data de expiração. e a gente passa isso usando o EX e depois a gente passa o numero de segundos para essa informação expirar. isso é bom porque a gente não quer manter o cache eternamente. isso é ate perigoso com informações desatualizadas e tal. então a gente pode fazer 60 * 15 para deixar 60 segundo vezes 15 minutos.
+  async set(key: string, value: string): Promise<void> {
+    await this.redis.set(key, value, 'EX', 60 * 15)
+  }
+  o nome EX antes poderia ser tambem outras coisas como FX para milissegundos o EXAT a gente passa uma data para ele expirar e varios outros que podemos ver na documentaçéao do redis. o ex então lida com segundos.
+  para o metodo get a gente da um return this.redis.get(key) e o del a gente vai colocar em async e await porque o del do redis retorna o numero de dados que foram deletads entao não vai funcionar fazerndo um return. a pagina fica assim:
+  import { Injectable } from '@nestjs/common'
+import { CacheRepository } from '../cache-repository'
+import { RedisService } from './redis.service'
+
+@Injectable()
+export class RedisCacheRepository implements CacheRepository {
+  constructor(private redis: RedisService) {}
+  async set(key: string, value: string): Promise<void> {
+    await this.redis.set(key, value, 'EX', 60 * 15)
+  }
+
+  get(key: string): Promise<string | null> {
+    return this.redis.get(key)
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.redis.del(key)
+  }
+}
+*agra que remos o repositorio cache implementado a gente pode ir no cache module e dentro de providers a gente faz aquela chave com o useClass
+   {
+      provide: CacheRepository,
+      useClass: RedisCacheRepository,
+    },
+
+  e tambem exportams o cache repository. e tinha um erro que em providers a gente tinha colocado envService e é redis service. e la no redisService a gente tem que colocar o injectable. ele fica assim:
+  import { EnvService } from '@/infra/env/env.service'
+import { Injectable, OnModuleDestroy } from '@nestjs/common'
+import { Redis } from 'ioredis'
+
+@Injectable()
+export class RedisService extends Redis implements OnModuleDestroy {
+  constructor(envService: EnvService) {
+    super({
+      host: envService.get('REDIS_HOST'),
+      port: envService.get('REDIS_PORT'),
+      db: envService.get('REDIS_DB'),
+    })
+  }
+
+  onModuleDestroy() {
+    return this.disconnect()
+  }
+}
+
+    o module fica assim:
+  
+import { Module } from '@nestjs/common'
+import { EnvModule } from '../env/env.module'
+import { CacheRepository } from './cache-repository'
+import { RedisCacheRepository } from './redis/redis-cache-repository'
+import { RedisService } from './redis/redis.service'
+
+@Module({
+  imports: [EnvModule],
+  providers: [
+    RedisService,
+    {
+      provide: CacheRepository,
+      useClass: RedisCacheRepository,
+    },
+  ],
+  exports: [CacheRepository],
+})
+export class CacheModule {}
