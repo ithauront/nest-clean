@@ -17196,4 +17196,303 @@ export class PrismaQuestionsRepository implements QuestionsRepository {
 
 agora com isso ele ja passa. so temos que lembrar de sempre rodar o docker usando o sudo docker compose up -d
 tem que ter o sudo se não a imagem do cache não roda.
+porem é legal a gente lembrar que o ideal é não usar o mesmo banco de dados para desenvolvimento e para teste. então a gente pode fazer como no prisma e alterar a url do banco de dados para os testes porem dessa vez não vamos alterar a url e sim o indice do banco de dados
+no nosso env a gente criou o redis db então vamos no env.test que é o arquivo que subescreve a confiruação na hora do teste e nele vamos passar um outro revis db como 1 fica assim o env. test
+#override env variables during test
+AWS_BUCKET_NAME="ignite-nest-clean-test"
+REDIS_DB=1
 
+e assim nos testes o redis vai usar um outro db.
+
+com isso vamos salvar as coisas no nosso banco de dados em teste.
+mas o que podemos fazer tambem é apagar todos os dados do banco de teste do redis antes dos testes executarem.
+então vamos la no setupE2E e vamos importar o redis de dentro de ioredis
+import { Redis } from 'ioredis'
+e vamos fazer a conexão com o banco de dados. então se hoje a gente esta usando o env nesse arquivo mas nos podemos tambem fazer uma const env e importar o envSchema e fazer um parse em process. env
+const env = envSchema.parse(process.env)
+e agora para a conexão com o redis a gente joga uma const redis = new redis( e passamos configurações aqui)
+com isso do env agora para a gente setar o host do redis so de escrever env. ele ja vai trazer as variaveis que existem porque usando o process.env ele não traz. então vamos setar o host o port e o db 
+const redis = new Redis({
+  host: env.REDIS_HOST,
+  port: env.REDIS_PORT,
+  db: env.REDIS_DB,
+})
+e como criamos o env a gente pode trocar nos outros lugares onde esta process env so por env
+e agra que temos essa conexão com o redis no before all a gente pode eliminar todos os dados do redis. é so dar um await redis.flushdb()
+beforeAll(async () => {
+  const databaseUrl = generateUniqueDatabaseURL(schemaId)
+  process.env.DATABASE_URL = databaseUrl
+
+  DomainEvents.shouldRun = false
+
+  await redis.flushdb()
+
+  execSync('npx prisma migrate deploy')
+})
+a gente usa flushdb e néao flush all porque o all apara os dados de todos os bancos de dados e nesse caso a gente quer so do db que a gente selecionou. 
+o setup fica assim:
+import { config } from 'dotenv'
+import { PrismaClient } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
+import { execSync } from 'node:child_process'
+import { DomainEvents } from '@/core/event/domain-events'
+import { Redis } from 'ioredis'
+import { envSchema } from '@/infra/env/env'
+
+config({ path: '.env', override: true })
+config({ path: '.env.test', override: true })
+
+const env = envSchema.parse(process.env)
+
+const prisma = new PrismaClient()
+const redis = new Redis({
+  host: env.REDIS_HOST,
+  port: env.REDIS_PORT,
+  db: env.REDIS_DB,
+})
+
+function generateUniqueDatabaseURL(schemaId: string) {
+  if (!env.DATABASE_URL) {
+    throw new Error('Please provide a DATABASE_URL environment variable')
+  }
+
+  const url = new URL(env.DATABASE_URL)
+
+  url.searchParams.set('schema', schemaId)
+
+  return url.toString()
+}
+const schemaId = randomUUID()
+beforeAll(async () => {
+  const databaseUrl = generateUniqueDatabaseURL(schemaId)
+  process.env.DATABASE_URL = databaseUrl
+
+  DomainEvents.shouldRun = false
+
+  await redis.flushdb()
+
+  execSync('npx prisma migrate deploy')
+})
+
+afterAll(async () => {
+  await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaId}" CASCADE`)
+  prisma.$disconnect()
+})
+
+e agora voltamos para o nosso teste do repositorio e duplicamos o teste porque vamos fazer um segundo teste para ver se ele retorna as details que foram cacheadas nas chamadas sequentes.
+ou seja a primeira chamada que a gente fizer ele vai criar o cache mas nas sequentes ele ja deve ver que tem o cache la e pegar do cache e não do banco de dados normall.
+então antes de chamar o find details by slug a gente vai setar o cache. passando o cacherepository set e passando como segundo argumento um jsonstringfy comocando algo aleatorio nele:
+ await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+a gente néao precisa colocar os questionDetails reais porque esse metodo vai bater no cache e vai retornar qualquer coisa que tenha la. 
+e agora que a gente deu esse set a gente quer que na chamada do finddetails ele retorne o que a gente setou que é o que esta no cache. e não o que busque do banco de dados. então esperamos que o nosso questionDetails seja igual a empty:true 
+fica assim o teste:
+test('if can return cached question details on subsequent calls', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    const questionDetails = await questionRepository.findDetailsBySlug(slug)
+
+    expect(questionDetails).toEqual({ empty: true })
+  })
+
+  e agora vamos fazer o ultimo teste que é para ver se esta deletando do cache quando salvamos uma pergunta
+  a gente faz igual até o set do cache e depois disso a gente tem que dar um update na pergunta. 
+
+    await questionRepository.save(question)
+    então depois que fizemos isso o cache deve ser deletado porque a gente colocou o delete nesse metodo (colocamos tambem no metodo delete então tambem vamos ter que criar esse teste por conta propria.)
+então apos isso a gente vai tentar buscar cached e esperamos que seja nulo
+ test('if can reset question cached details when saving question', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    await questionRepository.save(question)
+
+    const cached = await cacheRepository.get(`question:${slug}:details`)
+
+    expect(cached).toBeNull()
+  })
+
+  e agora vamos fazer tambem um praticamente igual a esse mas chamadno o metodo de delte da question fica assim:
+  import { QuestionsRepository } from '@/domain/forum/application/repositories/questions-repository'
+import { AppModule } from '@/infra/app.module'
+import { CacheRepository } from '@/infra/cache/cache-repository'
+import { CacheModule } from '@/infra/cache/cache.module'
+import { DatabaseModule } from '@/infra/database/prisma/database.module'
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import { AttachmentFactory } from 'test/factories/make-attachemnt'
+import { QuestionFactory } from 'test/factories/make-question'
+import { QuestionAttachmentFactory } from 'test/factories/make-question-attachments'
+import { StudentFactory } from 'test/factories/make-student'
+
+describe('Prisma Questions Repository (e2e)', () => {
+  let app: INestApplication
+  let studentFactory: StudentFactory
+  let questionFactory: QuestionFactory
+  let attachmentFactory: AttachmentFactory
+  let questionAttachmentFactory: QuestionAttachmentFactory
+  let cacheRepository: CacheRepository
+  let questionRepository: QuestionsRepository
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule, DatabaseModule, CacheModule],
+      providers: [
+        StudentFactory,
+        QuestionFactory,
+        AttachmentFactory,
+        QuestionAttachmentFactory,
+      ],
+    }).compile()
+
+    app = moduleRef.createNestApplication()
+    studentFactory = moduleRef.get(StudentFactory)
+    questionFactory = moduleRef.get(QuestionFactory)
+    attachmentFactory = moduleRef.get(AttachmentFactory)
+    questionAttachmentFactory = moduleRef.get(QuestionAttachmentFactory)
+    cacheRepository = moduleRef.get(CacheRepository)
+    questionRepository = moduleRef.get(QuestionsRepository)
+
+    await app.init()
+  })
+
+  test('if can cache question details', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    const questionDetails = await questionRepository.findDetailsBySlug(slug)
+    const cached = await cacheRepository.get(`question:${slug}:details`)
+    expect(cached).toEqual(JSON.stringify(questionDetails))
+  })
+  test('if can return cached question details on subsequent calls', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    const questionDetails = await questionRepository.findDetailsBySlug(slug)
+
+    expect(questionDetails).toEqual({ empty: true })
+  })
+  test('if can reset question cached details when saving question', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    await questionRepository.save(question)
+
+    const cached = await cacheRepository.get(`question:${slug}:details`)
+
+    expect(cached).toBeNull()
+  })
+  test('if can reset question cached details when saving question', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    await questionRepository.delete(question)
+
+    const cached = await cacheRepository.get(`question:${slug}:details`)
+
+    expect(cached).toBeNull()
+  })
+})
+
+e com isso a gente termina todos os testes e por consequencia a aplicação.

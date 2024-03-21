@@ -61,4 +61,83 @@ describe('Prisma Questions Repository (e2e)', () => {
     const cached = await cacheRepository.get(`question:${slug}:details`)
     expect(cached).toEqual(JSON.stringify(questionDetails))
   })
+  test('if can return cached question details on subsequent calls', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    const questionDetails = await questionRepository.findDetailsBySlug(slug)
+
+    expect(questionDetails).toEqual({ empty: true })
+  })
+  test('if can reset question cached details when saving question', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    await questionRepository.save(question)
+
+    const cached = await cacheRepository.get(`question:${slug}:details`)
+
+    expect(cached).toBeNull()
+  })
+  test('if can reset question cached details when saving question', async () => {
+    const user = await studentFactory.makePrismaStudent()
+
+    const question = await questionFactory.makePrismaQuestion({
+      authorId: user.id,
+    })
+
+    const attachment = await attachmentFactory.makePrismaAttachment()
+
+    await questionAttachmentFactory.makePrismaQuestionAttachment({
+      attachmentId: attachment.id,
+      questionId: question.id,
+    })
+
+    const slug = question.slug.value
+
+    await cacheRepository.set(
+      `question:${slug}:details`,
+      JSON.stringify({ empty: true }),
+    )
+
+    await questionRepository.delete(question)
+
+    const cached = await cacheRepository.get(`question:${slug}:details`)
+
+    expect(cached).toBeNull()
+  })
 })
